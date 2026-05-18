@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
@@ -5,11 +7,11 @@ use crate::session::SessionManager;
 use crate::tools::Tool;
 
 pub struct QuerySessionsTool {
-    sessions: std::sync::Arc<SessionManager>,
+    sessions: Arc<SessionManager>,
 }
 
 impl QuerySessionsTool {
-    pub fn new(sessions: std::sync::Arc<SessionManager>) -> Self {
+    pub fn new(sessions: Arc<SessionManager>) -> Self {
         Self { sessions }
     }
 }

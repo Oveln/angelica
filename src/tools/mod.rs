@@ -9,11 +9,14 @@ pub mod update_user_profile;
 pub mod write_file;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::llm::types::ToolSpec;
+use crate::memory::MemoryManager;
+use crate::session::SessionManager;
 
 #[async_trait]
 pub trait Tool: Send + Sync {
@@ -46,6 +49,24 @@ impl ToolRegistry {
         }
     }
 
+    pub fn with_defaults(memory: Arc<MemoryManager>, sessions: Arc<SessionManager>) -> Self {
+        let mut reg = Self::new();
+        reg.register(Box::new(update_agent_memory::UpdateAgentMemoryTool::new(
+            memory.clone(),
+        )));
+        reg.register(Box::new(update_user_profile::UpdateUserProfileTool::new(
+            memory.clone(),
+        )));
+        reg.register(Box::new(update_soul::UpdateSoulTool::new(memory)));
+        reg.register(Box::new(query_sessions::QuerySessionsTool::new(sessions)));
+        reg.register(Box::new(run_command::RunCommandTool));
+        reg.register(Box::new(read_file::ReadFileTool));
+        reg.register(Box::new(write_file::WriteFileTool));
+        reg.register(Box::new(edit_file::EditFileTool));
+        reg.register(Box::new(list_dir::ListDirTool));
+        reg
+    }
+
     pub fn register(&mut self, tool: Box<dyn Tool>) {
         self.tools.insert(tool.name().to_string(), tool);
     }
@@ -73,9 +94,6 @@ impl Default for ToolRegistry {
     }
 }
 
-/// Produce a unified diff between old and new content.
-/// Uses `similar::TextDiff` for proper hunks with context, matching the format
-/// the TUI diff renderer expects (`--- a/`, `+++ b/`, `@@` hunk headers).
 pub fn make_unified_diff(path: &str, old: &str, new: &str) -> String {
     if old == new {
         return String::new();
@@ -88,8 +106,6 @@ pub fn make_unified_diff(path: &str, old: &str, new: &str) -> String {
         .context_radius(3)
         .header(&a, &b)
         .to_string();
-    // Strip git's "\ No newline at end of file" markers — they're noise
-    // that breaks the visual adjacency of removed/added pairs.
     raw.lines()
         .filter(|line| *line != "\\ No newline at end of file")
         .collect::<Vec<_>>()

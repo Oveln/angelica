@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
@@ -5,11 +7,11 @@ use crate::memory::MemoryManager;
 use crate::tools::Tool;
 
 pub struct UpdateUserProfileTool {
-    memory: std::sync::Arc<tokio::sync::RwLock<MemoryManager>>,
+    memory: Arc<MemoryManager>,
 }
 
 impl UpdateUserProfileTool {
-    pub fn new(memory: std::sync::Arc<tokio::sync::RwLock<MemoryManager>>) -> Self {
+    pub fn new(memory: Arc<MemoryManager>) -> Self {
         Self { memory }
     }
 }
@@ -50,10 +52,9 @@ impl Tool for UpdateUserProfileTool {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'content'"))?;
 
-        let mem = self.memory.write().await;
         match action {
-            "append" => mem.append_user_profile(content),
-            "overwrite" => mem.write_user_profile(content),
+            "append" => self.memory.append_user_profile(content),
+            "overwrite" => self.memory.write_user_profile(content),
             _ => return Ok(format!("Unknown action: {}", action)),
         }
         Ok("User profile updated.".to_string())

@@ -8,7 +8,9 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::agent::events::{AppEvent, UserAction};
-use crate::agent::group::{BatchedEdit, PendingApproval, ToolCallGroup, group_tool_calls, needs_tty};
+use crate::agent::group::{
+    BatchedEdit, PendingApproval, ToolCallGroup, group_tool_calls, needs_tty,
+};
 use crate::agent::history::History;
 use crate::config::Config;
 use crate::llm::types::ChatMessage;
@@ -17,10 +19,7 @@ use crate::mcp::McpClientManager;
 use crate::memory::MemoryManager;
 use crate::session::SessionManager;
 use crate::skills::SkillRegistry;
-use crate::tools::{
-    ToolRegistry, edit_file, list_dir, query_sessions, read_file, run_command, update_agent_memory,
-    update_soul, update_user_profile, write_file,
-};
+use crate::tools::ToolRegistry;
 
 const SYSTEM_PROMPT_BASE: &str =
     "You are Lilium, a helpful AI assistant. You can use tools to help the user.
@@ -40,39 +39,25 @@ For example, you can read multiple files, run multiple commands, or mix reads an
 pub struct Agent {
     config: Config,
     llm: crate::llm::LlmClient,
-    memory: Arc<tokio::sync::RwLock<MemoryManager>>,
+    memory: Arc<MemoryManager>,
     sessions: Arc<SessionManager>,
     skills: SkillRegistry,
     tools: ToolRegistry,
     mcp: McpClientManager,
     history: History,
     pending_approvals: VecDeque<PendingApproval>,
+    dirty: bool,
 }
 
 impl Agent {
     pub fn new(config: Config) -> Self {
         let llm = crate::llm::LlmClient::new(&config.llm);
-        let memory = Arc::new(tokio::sync::RwLock::new(MemoryManager::new(&config.memory)));
+        let memory = Arc::new(MemoryManager::new(&config.memory));
         let sessions = Arc::new(SessionManager::new(&config.session));
         let mut skills = SkillRegistry::new(&config.skills.directory);
         skills.discover();
 
-        let mut tools = ToolRegistry::new();
-        tools.register(Box::new(update_agent_memory::UpdateAgentMemoryTool::new(
-            memory.clone(),
-        )));
-        tools.register(Box::new(update_user_profile::UpdateUserProfileTool::new(
-            memory.clone(),
-        )));
-        tools.register(Box::new(update_soul::UpdateSoulTool::new(memory.clone())));
-        tools.register(Box::new(query_sessions::QuerySessionsTool::new(
-            sessions.clone(),
-        )));
-        tools.register(Box::new(run_command::RunCommandTool));
-        tools.register(Box::new(read_file::ReadFileTool));
-        tools.register(Box::new(write_file::WriteFileTool));
-        tools.register(Box::new(edit_file::EditFileTool));
-        tools.register(Box::new(list_dir::ListDirTool));
+        let tools = ToolRegistry::with_defaults(memory.clone(), sessions.clone());
 
         Self {
             config,
@@ -84,6 +69,7 @@ impl Agent {
             mcp: McpClientManager::new(),
             history: History::new(),
             pending_approvals: VecDeque::new(),
+            dirty: false,
         }
     }
 
@@ -92,11 +78,22 @@ impl Agent {
         Ok(())
     }
 
+    pub async fn shutdown(&mut self) {
+        if self.dirty {
+            let _ = self.save_session().await;
+        }
+        self.mcp.disconnect_all().await;
+    }
+
+    pub async fn save_session(&self) -> anyhow::Result<()> {
+        self.sessions.save_session(self.history.messages())?;
+        Ok(())
+    }
+
     pub async fn build_system_message(&self) -> ChatMessage {
         let mut content = String::new();
 
-        let mem = self.memory.read().await;
-        let soul = mem.read_soul();
+        let soul = self.memory.read_soul();
         if !soul.trim().is_empty() {
             content.push_str(&soul);
             content.push_str("\n\n");
@@ -111,12 +108,12 @@ impl Agent {
             ));
         }
 
-        let agent_mem = mem.read_agent_memory();
+        let agent_mem = self.memory.read_agent_memory();
         if !agent_mem.trim().is_empty() {
             content.push_str(&format!("\n\n## Your Memory\n{}", agent_mem));
         }
 
-        let user_profile = mem.read_user_profile();
+        let user_profile = self.memory.read_user_profile();
         if !user_profile.trim().is_empty() {
             content.push_str(&format!("\n\n## User Profile\n{}", user_profile));
         }
@@ -167,24 +164,20 @@ impl Agent {
 
             let specs = self.all_tool_specs();
 
-            let (stream_tx, mut stream_rx) =
-                mpsc::channel::<AppStreamEvent>(512);
+            let (stream_tx, mut stream_rx) = mpsc::channel::<AppStreamEvent>(512);
 
             let fwd_tx = event_tx.clone();
             let drain_handle = tokio::spawn(async move {
                 while let Some(evt) = stream_rx.recv().await {
                     match evt {
                         AppStreamEvent::ThinkingDelta { delta } => {
-                            let _ = fwd_tx
-                                .send(AppEvent::ThinkingDelta { delta })
-                                .await;
+                            let _ = fwd_tx.send(AppEvent::ThinkingDelta { delta }).await;
                         }
                         AppStreamEvent::TextDelta { delta } => {
-                            let _ = fwd_tx
-                                .send(AppEvent::TextDelta { delta })
-                                .await;
+                            let _ = fwd_tx.send(AppEvent::TextDelta { delta }).await;
                         }
-                        AppStreamEvent::ToolCallStart { .. } | AppStreamEvent::ToolCallArgsDelta { .. } => {}
+                        AppStreamEvent::ToolCallStart { .. }
+                        | AppStreamEvent::ToolCallArgsDelta { .. } => {}
                         AppStreamEvent::Done => break,
                     }
                 }
@@ -217,6 +210,7 @@ impl Agent {
 
             self.history
                 .record_assistant(content.clone(), reasoning, tool_calls.clone());
+            self.dirty = true;
 
             let full_text = content.unwrap_or_default();
             let _ = event_tx
@@ -301,7 +295,10 @@ impl Agent {
                             .map(|e| (e.search.clone(), e.replace.clone()))
                             .collect();
 
-                        let preview = match edit_file::preview_batched(path, &searches_replaces) {
+                        let preview = match crate::tools::edit_file::preview_batched(
+                            path,
+                            &searches_replaces,
+                        ) {
                             Ok(p) => p,
                             Err(e) => format!("Preview failed: {}", e),
                         };
@@ -362,7 +359,7 @@ impl Agent {
     ) -> (String, bool, Option<String>) {
         if let Some(edits) = batched_edits {
             let path = args["path"].as_str().unwrap_or("?");
-            match edit_file::preview_batched(path, edits) {
+            match crate::tools::edit_file::preview_batched(path, edits) {
                 Ok(preview) => return (preview, false, None),
                 Err(e) => {
                     return (
@@ -408,7 +405,7 @@ impl Agent {
                 .map(|e| (e.search.clone(), e.replace.clone()))
                 .collect();
             let path = pending.args["path"].as_str().unwrap_or("?");
-            match edit_file::execute_batched(path, &edits) {
+            match crate::tools::edit_file::execute_batched(path, &edits) {
                 Ok(summary) => summary,
                 Err(e) => format!("Error: {}", e),
             }
@@ -503,10 +500,6 @@ impl Agent {
         self.react_loop(event_tx).await
     }
 
-    pub fn clear_history(&mut self) {
-        self.history.clear();
-    }
-
     pub fn push_user_message(&mut self, content: &str) {
         self.history.push(ChatMessage {
             role: "user".to_string(),
@@ -516,11 +509,61 @@ impl Agent {
             tool_call_id: None,
             name: None,
         });
+        self.dirty = true;
     }
 
-    pub async fn save_session(&self) -> anyhow::Result<()> {
-        self.sessions.save_session(self.history.messages())?;
-        Ok(())
+    pub fn clear_history(&mut self) {
+        self.history.clear();
+        self.dirty = false;
+    }
+
+    pub async fn save_if_dirty(&mut self) {
+        if self.dirty {
+            let _ = self.save_session().await;
+            self.dirty = false;
+        }
+    }
+}
+
+async fn run_loop(
+    agent: &mut Agent,
+    user_rx: &mut mpsc::Receiver<UserAction>,
+    event_tx: &mpsc::Sender<AppEvent>,
+) {
+    while let Some(action) = user_rx.recv().await {
+        match action {
+            UserAction::SendMessage { content } => {
+                agent.push_user_message(&content);
+                let _ = agent.react_loop(event_tx).await;
+                agent.save_if_dirty().await;
+            }
+            UserAction::ApprovePending => {
+                let _ = agent.approve_pending(event_tx).await;
+                agent.save_if_dirty().await;
+            }
+            UserAction::ApprovePendingWithResult { output } => {
+                let _ = agent.approve_pending_with_result(output, event_tx).await;
+                agent.save_if_dirty().await;
+            }
+            UserAction::RejectCommand { feedback } => {
+                let _ = agent
+                    .reject_command(feedback.as_deref().unwrap_or(""), event_tx)
+                    .await;
+                agent.save_if_dirty().await;
+            }
+            UserAction::Interrupt => {
+                agent.save_if_dirty().await;
+                agent.pending_approvals.clear();
+                agent.history.clear();
+                agent.dirty = false;
+            }
+            UserAction::ClearHistory => {
+                agent.clear_history();
+            }
+            UserAction::Quit => {
+                break;
+            }
+        }
     }
 }
 
@@ -542,35 +585,7 @@ pub async fn run(
 
     let _ = event_tx.send(AppEvent::Ready).await;
 
-    while let Some(action) = user_rx.recv().await {
-        match action {
-            UserAction::SendMessage { content } => {
-                agent.push_user_message(&content);
-                let _deferred = agent.react_loop(&event_tx).await;
-            }
-            UserAction::ApprovePending => {
-                let _deferred = agent.approve_pending(&event_tx).await;
-            }
-            UserAction::ApprovePendingWithResult { output } => {
-                let _deferred = agent.approve_pending_with_result(output, &event_tx).await;
-            }
-            UserAction::RejectCommand { feedback } => {
-                let _deferred = agent
-                    .reject_command(feedback.as_deref().unwrap_or(""), &event_tx)
-                    .await;
-            }
-            UserAction::Interrupt => {
-                let _ = agent.save_session().await;
-                agent.pending_approvals.clear();
-                agent.history.clear();
-            }
-            UserAction::ClearHistory => {
-                agent.clear_history();
-            }
-            UserAction::Quit => {
-                let _ = agent.save_session().await;
-                break;
-            }
-        }
-    }
+    run_loop(&mut agent, &mut user_rx, &event_tx).await;
+
+    agent.shutdown().await;
 }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
@@ -5,11 +7,11 @@ use crate::memory::MemoryManager;
 use crate::tools::Tool;
 
 pub struct UpdateSoulTool {
-    memory: std::sync::Arc<tokio::sync::RwLock<MemoryManager>>,
+    memory: Arc<MemoryManager>,
 }
 
 impl UpdateSoulTool {
-    pub fn new(memory: std::sync::Arc<tokio::sync::RwLock<MemoryManager>>) -> Self {
+    pub fn new(memory: Arc<MemoryManager>) -> Self {
         Self { memory }
     }
 }
@@ -41,8 +43,7 @@ impl Tool for UpdateSoulTool {
         let content = args["content"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'content'"))?;
-        let mem = self.memory.read().await;
-        mem.write_soul(content);
+        self.memory.write_soul(content);
         Ok("SOUL.md updated. Changes will take effect in the next interaction.".to_string())
     }
 }
