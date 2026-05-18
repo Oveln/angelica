@@ -11,7 +11,6 @@ pub enum AppEvent {
     },
     TurnComplete,
 
-    ToolCallsStart,
     ToolCalling {
         name: String,
         arguments: String,
@@ -33,7 +32,6 @@ pub enum AppEvent {
         feedback: String,
     },
 
-    Ready,
     Error {
         message: String,
     },

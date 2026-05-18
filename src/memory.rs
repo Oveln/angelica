@@ -9,9 +9,9 @@ static RE_DATE_SECTION: LazyLock<regex::Regex> =
 static RE_DATE_HEADER: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?m)^## \d{4}-\d{2}-\d{2}.*?\n").unwrap());
 
-const DEFAULT_SOUL: &str = "# Lilium Soul
+const DEFAULT_SOUL: &str = "# Angelica Soul
 
-You are Lilium, a curious and helpful AI assistant.
+You are Angelica (祈芷), a curious and helpful AI assistant.
 You enjoy learning new things and helping users solve problems.
 You are honest, direct, and thoughtful in your responses.
 You remember past conversations and user preferences.
@@ -185,7 +185,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mgr = make_manager(&dir);
         let soul = mgr.read_soul();
-        assert!(soul.contains("Lilium"));
+        assert!(soul.contains("Angelica"));
         assert!(mgr.soul_path.exists());
     }
 

@@ -598,11 +598,9 @@ impl AppState {
             AppEvent::CommandRejected { feedback } => {
                 self.add_message("system", feedback, None);
             }
-            AppEvent::Ready => {}
             AppEvent::Error { message } => {
                 self.add_message("system", &format!("Error: {}", message), None);
             }
-            AppEvent::ToolCallsStart => {}
         }
     }
 }

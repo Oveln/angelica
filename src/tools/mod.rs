@@ -79,12 +79,10 @@ impl ToolRegistry {
         self.tools.values().map(|t| t.to_spec()).collect()
     }
 
-    pub fn auto_execute_names(&self) -> Vec<String> {
+    pub fn is_auto_execute(&self, name: &str) -> bool {
         self.tools
-            .iter()
-            .filter(|(_, t)| !t.requires_approval())
-            .map(|(name, _)| name.clone())
-            .collect()
+            .get(name)
+            .map_or(false, |t| !t.requires_approval())
     }
 }
 
