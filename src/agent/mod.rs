@@ -46,6 +46,7 @@ pub struct Agent {
     mcp: McpClientManager,
     history: History,
     pending_approvals: VecDeque<PendingApproval>,
+    remaining_tool_calls: VecDeque<ToolCallGroup>,
     dirty: bool,
 }
 
@@ -69,6 +70,7 @@ impl Agent {
             mcp: McpClientManager::new(),
             history: History::new(),
             pending_approvals: VecDeque::new(),
+            remaining_tool_calls: VecDeque::new(),
             dirty: false,
         }
     }
@@ -226,9 +228,10 @@ impl Agent {
 
             let _ = event_tx.send(AppEvent::ToolCallsStart).await;
 
-            let grouped = group_tool_calls(tcs);
+            let grouped: VecDeque<ToolCallGroup> = group_tool_calls(tcs).into();
+            let mut remaining = grouped;
 
-            for item in &grouped {
+            while let Some(item) = remaining.pop_front() {
                 match item {
                     ToolCallGroup::Single { tc } => {
                         let name = tc.function.name.clone();
@@ -266,6 +269,8 @@ impl Agent {
                                 batched_edits: None,
                             });
 
+                            self.remaining_tool_calls = remaining;
+
                             let _ = event_tx
                                 .send(AppEvent::ApprovalPending {
                                     preview,
@@ -273,6 +278,8 @@ impl Agent {
                                     command,
                                 })
                                 .await;
+
+                            return true;
                         }
                     }
                     ToolCallGroup::BatchedEdits { path, edits } => {
@@ -296,14 +303,14 @@ impl Agent {
                             .collect();
 
                         let preview = match crate::tools::edit_file::preview_batched(
-                            path,
+                            &path,
                             &searches_replaces,
                         ) {
                             Ok(p) => p,
                             Err(e) => format!("Preview failed: {}", e),
                         };
 
-                        for e in edits {
+                        for e in &edits {
                             self.history.record_tool_result(
                                 e.tc_id.clone(),
                                 "Pending user approval...".to_string(),
@@ -326,6 +333,8 @@ impl Agent {
                             batched_edits: Some(batched),
                         });
 
+                        self.remaining_tool_calls = remaining;
+
                         let _ = event_tx
                             .send(AppEvent::ApprovalPending {
                                 preview,
@@ -333,6 +342,8 @@ impl Agent {
                                 command: None,
                             })
                             .await;
+
+                        return true;
                     }
                 }
             }
@@ -497,7 +508,127 @@ impl Agent {
                 .await;
             return true;
         }
+
+        if self.process_remaining_tool_calls(event_tx).await {
+            return true;
+        }
+
         self.react_loop(event_tx).await
+    }
+
+    async fn process_remaining_tool_calls(&mut self, event_tx: &mpsc::Sender<AppEvent>) -> bool {
+        let auto_names = self.auto_execute_names();
+        while let Some(item) = self.remaining_tool_calls.pop_front() {
+            match item {
+                ToolCallGroup::Single { tc } => {
+                    let name = tc.function.name.clone();
+                    let args: serde_json::Value = serde_json::from_str(&tc.function.arguments)
+                        .unwrap_or(serde_json::Value::Null);
+
+                    let _ = event_tx
+                        .send(AppEvent::ToolCalling {
+                            name: name.clone(),
+                            arguments: tc.function.arguments.clone(),
+                        })
+                        .await;
+
+                    if auto_names.contains(&name) {
+                        let result = self.execute_tool(&name, args).await;
+                        let _ = event_tx
+                            .send(AppEvent::ToolResult {
+                                name: name.clone(),
+                                result: result.clone(),
+                            })
+                            .await;
+                        self.history.record_tool_result(tc.id.clone(), result);
+                    } else {
+                        let (preview, is_tty, command) =
+                            self.make_approval_preview(&name, &args, None);
+
+                        self.history.record_tool_result(
+                            tc.id.clone(),
+                            "Pending user approval...".to_string(),
+                        );
+                        self.pending_approvals.push_back(PendingApproval {
+                            tc_ids: vec![tc.id.clone()],
+                            tool_name: name.clone(),
+                            args: args.clone(),
+                            batched_edits: None,
+                        });
+
+                        let _ = event_tx
+                            .send(AppEvent::ApprovalPending {
+                                preview,
+                                is_tty_command: is_tty,
+                                command,
+                            })
+                            .await;
+
+                        return true;
+                    }
+                }
+                ToolCallGroup::BatchedEdits { path, edits } => {
+                    let count = edits.len();
+                    let display_args = serde_json::to_string(&serde_json::json!({
+                        "path": path,
+                        "count": count,
+                    }))
+                    .unwrap_or_default();
+
+                    let _ = event_tx
+                        .send(AppEvent::ToolCalling {
+                            name: "edit_file".to_string(),
+                            arguments: display_args,
+                        })
+                        .await;
+
+                    let searches_replaces: Vec<(String, String)> = edits
+                        .iter()
+                        .map(|e| (e.search.clone(), e.replace.clone()))
+                        .collect();
+
+                    let preview =
+                        match crate::tools::edit_file::preview_batched(&path, &searches_replaces) {
+                            Ok(p) => p,
+                            Err(e) => format!("Preview failed: {}", e),
+                        };
+
+                    for e in &edits {
+                        self.history.record_tool_result(
+                            e.tc_id.clone(),
+                            "Pending user approval...".to_string(),
+                        );
+                    }
+
+                    let batched: Vec<BatchedEdit> = edits
+                        .iter()
+                        .map(|e| BatchedEdit {
+                            tc_id: e.tc_id.clone(),
+                            search: e.search.clone(),
+                            replace: e.replace.clone(),
+                        })
+                        .collect();
+
+                    self.pending_approvals.push_back(PendingApproval {
+                        tc_ids: batched.iter().map(|b| b.tc_id.clone()).collect(),
+                        tool_name: "edit_file".to_string(),
+                        args: serde_json::json!({"path": path}),
+                        batched_edits: Some(batched),
+                    });
+
+                    let _ = event_tx
+                        .send(AppEvent::ApprovalPending {
+                            preview,
+                            is_tty_command: false,
+                            command: None,
+                        })
+                        .await;
+
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub fn push_user_message(&mut self, content: &str) {

@@ -560,13 +560,23 @@ impl AppState {
                     }
                 };
 
-                self.messages.push(DisplayMessage {
-                    role: "diff".to_string(),
-                    content: preview.clone(),
-                    thinking: None,
-                    collapsed: false,
-                    hidden: false,
-                });
+                let has_diff_content = preview.lines().count() > 1 || !preview.starts_with("$ ");
+
+                if has_diff_content {
+                    if let Some(last) = self.messages.last_mut() {
+                        if last.role == "tool" {
+                            last.hidden = true;
+                        }
+                    }
+
+                    self.messages.push(DisplayMessage {
+                        role: "diff".to_string(),
+                        content: preview.clone(),
+                        thinking: None,
+                        collapsed: false,
+                        hidden: false,
+                    });
+                }
                 self.scroll_to_bottom();
                 self.mode = AppMode::Approval {
                     tool_label,
