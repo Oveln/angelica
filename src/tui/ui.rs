@@ -154,7 +154,7 @@ pub struct DisplayMessage {
 pub enum AppMode {
     Chat,
     Approval {
-        preview: String,
+        tool_label: String,
         is_tty_command: bool,
         command: Option<String>,
     },
@@ -538,6 +538,28 @@ impl AppState {
             } => {
                 self.approval_selected = ApprovalChoice::Allow;
                 self.feedback_clear();
+
+                let tool_label = if let Some(cmd) = command {
+                    format!("→ $ {}", cmd)
+                } else {
+                    let first_line = preview.lines().next().unwrap_or("");
+                    if first_line.starts_with("---") || first_line.starts_with("diff ") {
+                        let second = preview.lines().nth(1).unwrap_or("");
+                        if let Some(path) = second.strip_prefix("+++ ") {
+                            format!(
+                                "→ edit {}",
+                                path.trim_start_matches('b').trim_start_matches('/')
+                            )
+                        } else {
+                            "→ edit".to_string()
+                        }
+                    } else if let Some(cmd) = first_line.strip_prefix("$ ") {
+                        format!("→ $ {}", cmd)
+                    } else {
+                        format!("→ {}", first_line)
+                    }
+                };
+
                 self.messages.push(DisplayMessage {
                     role: "diff".to_string(),
                     content: preview.clone(),
@@ -547,7 +569,7 @@ impl AppState {
                 });
                 self.scroll_to_bottom();
                 self.mode = AppMode::Approval {
-                    preview: String::new(),
+                    tool_label,
                     is_tty_command: *is_tty_command,
                     command: command.clone(),
                 };
@@ -586,7 +608,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
             } else {
                 0
             };
-            1 + feedback_bonus + 3
+            2 + feedback_bonus + 3
         }
         _ => 3,
     };
@@ -612,9 +634,9 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
     }
 
     match &state.mode {
-        AppMode::Approval { .. } => {
+        AppMode::Approval { tool_label, .. } => {
             let has_feedback = state.approval_selected == ApprovalChoice::EditFeedback;
-            let mut constraints = vec![Constraint::Length(1)];
+            let mut constraints = vec![Constraint::Length(2)];
             if has_feedback {
                 constraints.push(Constraint::Length(3));
             }
@@ -625,14 +647,14 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                 .constraints(constraints)
                 .split(chunks[1]);
 
-            draw_approval_choices(f, state, approval_chunks[0], &theme);
+            draw_approval_header(f, approval_chunks[0], tool_label, &theme);
             let input_idx = if has_feedback {
                 draw_feedback_input(f, state, approval_chunks[1], &theme);
                 2
             } else {
                 1
             };
-            draw_input(f, state, approval_chunks[input_idx], &theme);
+            draw_approval_choices(f, state, approval_chunks[input_idx], &theme);
         }
         _ => {
             draw_input(f, state, chunks[1], &theme);
@@ -904,6 +926,24 @@ fn draw_input(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
     f.set_cursor_position((area.x + prompt_width + display_col, area.y + 1));
 }
 
+fn draw_approval_header(f: &mut Frame, area: Rect, tool_label: &str, theme: &Theme) {
+    let header = Line::from(vec![
+        Span::styled(" \u{25B3} ", Style::default().fg(theme.warning)),
+        Span::styled(
+            "Permission required",
+            Style::default()
+                .fg(theme.input)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]);
+    let detail = Line::from(vec![
+        Span::styled("   ", Style::default()),
+        Span::styled(tool_label.to_string(), Style::default().fg(theme.muted)),
+    ]);
+    let para = Paragraph::new(vec![header, detail]).style(Style::default().bg(theme.status_bg));
+    f.render_widget(para, area);
+}
+
 fn draw_approval_choices(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
     let selected = state.approval_selected;
     let choices: Vec<Span> = ApprovalChoice::ALL
@@ -924,8 +964,21 @@ fn draw_approval_choices(f: &mut Frame, state: &AppState, area: Rect, theme: &Th
             vec![Span::styled(styled, choice.style(sel, theme))]
         })
         .collect();
-    let choices_line = Paragraph::new(Line::from(choices));
-    f.render_widget(choices_line, area);
+
+    let editing = state.approval_selected == ApprovalChoice::EditFeedback
+        && matches!(state.mode, AppMode::Approval { .. });
+    let hint_text = if editing {
+        "enter confirm  \u{2502}  esc cancel"
+    } else {
+        "\u{2194} select  \u{2502}  enter confirm  \u{2502}  esc reject"
+    };
+    let hints = Line::from(Span::styled(
+        format!("  {}", hint_text),
+        Style::default().fg(theme.status_muted),
+    ));
+
+    let para = Paragraph::new(vec![Line::from(""), Line::from(choices), hints]);
+    f.render_widget(para, area);
 }
 
 fn draw_feedback_input(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
