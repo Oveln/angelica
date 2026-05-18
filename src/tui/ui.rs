@@ -12,9 +12,9 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::agent::events::AppEvent;
-use super::constants::{COLOR_INPUT, COLOR_PROMPT, COLOR_TOOL, PROMPT};
 use super::render::build_all_lines;
+use super::theme::{APP_NAME, APP_TAGLINE, PROMPT, Theme, logo_lines};
+use crate::agent::events::AppEvent;
 
 const TAIL_SENTINEL: usize = usize::MAX;
 
@@ -49,24 +49,24 @@ impl ApprovalChoice {
         }
     }
 
-    fn style(self, selected: bool) -> Style {
+    fn style(self, selected: bool, theme: &Theme) -> Style {
         if selected {
             match self {
-                ApprovalChoice::Allow => {
-                    Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)
-                }
-                ApprovalChoice::Reject => {
-                    Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD)
-                }
-                ApprovalChoice::EditFeedback => {
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                }
+                ApprovalChoice::Allow => Style::default()
+                    .fg(Color::Black)
+                    .bg(theme.success)
+                    .add_modifier(Modifier::BOLD),
+                ApprovalChoice::Reject => Style::default()
+                    .fg(Color::Black)
+                    .bg(theme.error)
+                    .add_modifier(Modifier::BOLD),
+                ApprovalChoice::EditFeedback => Style::default()
+                    .fg(Color::Black)
+                    .bg(theme.warning)
+                    .add_modifier(Modifier::BOLD),
             }
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme.muted)
         }
     }
 }
@@ -104,13 +104,41 @@ pub struct SlashCommand {
 }
 
 pub static BUILTIN_COMMANDS: &[SlashCommand] = &[
-    SlashCommand { name: "help", aliases: &["?"], description: "Show available commands" },
-    SlashCommand { name: "clear", aliases: &[], description: "Clear conversation history" },
-    SlashCommand { name: "quit", aliases: &["q"], description: "Quit the application" },
-    SlashCommand { name: "verbose", aliases: &["v"], description: "Cycle display verbosity" },
-    SlashCommand { name: "thinking", aliases: &["think"], description: "Toggle thinking display" },
-    SlashCommand { name: "model", aliases: &[], description: "Show current model" },
-    SlashCommand { name: "history", aliases: &["h"], description: "Show recent history" },
+    SlashCommand {
+        name: "help",
+        aliases: &["?"],
+        description: "Show available commands",
+    },
+    SlashCommand {
+        name: "clear",
+        aliases: &[],
+        description: "Clear conversation history",
+    },
+    SlashCommand {
+        name: "quit",
+        aliases: &["q"],
+        description: "Quit the application",
+    },
+    SlashCommand {
+        name: "verbose",
+        aliases: &["v"],
+        description: "Cycle display verbosity",
+    },
+    SlashCommand {
+        name: "thinking",
+        aliases: &["think"],
+        description: "Toggle thinking display",
+    },
+    SlashCommand {
+        name: "model",
+        aliases: &[],
+        description: "Show current model",
+    },
+    SlashCommand {
+        name: "history",
+        aliases: &["h"],
+        description: "Show recent history",
+    },
 ];
 
 #[derive(Debug, Clone)]
@@ -158,9 +186,51 @@ pub struct AppState {
     pub slash_filter: String,
     pub slash_selected: usize,
     pub slash_matched: Vec<usize>,
+
+    pub model_name: String,
+    theme: Theme,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            messages: Vec::new(),
+            thinking_buffer: String::new(),
+            text_buffer: String::new(),
+            mode: AppMode::Chat,
+            input: String::new(),
+            input_cursor_char: 0,
+            should_quit: false,
+            thinking_visible: true,
+            verbosity: Verbosity::Normal,
+            is_streaming: false,
+            queued_messages: VecDeque::new(),
+            scroll_offset: TAIL_SENTINEL,
+            pending_scroll_delta: 0,
+            approval_selected: ApprovalChoice::Allow,
+            approval_feedback: String::new(),
+            approval_feedback_cursor: 0,
+            slash_filter: String::new(),
+            slash_selected: 0,
+            slash_matched: Vec::new(),
+            model_name: String::new(),
+            theme: Theme::default(),
+        }
+    }
 }
 
 impl AppState {
+    pub fn new(model_name: String) -> Self {
+        Self {
+            model_name,
+            ..Self::default()
+        }
+    }
+
+    pub fn theme(&self) -> &Theme {
+        &self.theme
+    }
+
     pub fn add_message(&mut self, role: &str, content: &str, thinking: Option<String>) {
         self.messages.push(DisplayMessage {
             role: role.to_string(),
@@ -172,10 +242,7 @@ impl AppState {
     }
 
     pub fn filtered_messages(&self) -> Vec<&DisplayMessage> {
-        self.messages
-            .iter()
-            .filter(|m| !m.hidden)
-            .collect()
+        self.messages.iter().filter(|m| !m.hidden).collect()
     }
 
     fn should_show_tool_result(&self, tool_name: &str) -> bool {
@@ -189,8 +256,6 @@ impl AppState {
     fn should_show_tool_call(&self, _tool_name: &str) -> bool {
         true
     }
-
-    // ── Input helpers ──
 
     pub fn input_insert(&mut self, c: char) {
         let byte_pos = Self::char_to_byte(self.input_cursor_char, &self.input);
@@ -247,8 +312,6 @@ impl AppState {
         self.input_cursor_char = 0;
     }
 
-    // ── Approval feedback helpers ──
-
     pub fn feedback_insert(&mut self, c: char) {
         let byte_pos = Self::char_to_byte(self.approval_feedback_cursor, &self.approval_feedback);
         self.approval_feedback.insert(byte_pos, c);
@@ -301,8 +364,6 @@ impl AppState {
             .unwrap_or(s.len())
     }
 
-    // ── Slash menu ──
-
     pub fn update_slash_matches(&mut self) {
         let filter = if self.input.starts_with('/') {
             &self.input[1..]
@@ -312,9 +373,7 @@ impl AppState {
         self.slash_filter = filter.to_string();
         self.slash_matched.clear();
         for (i, cmd) in BUILTIN_COMMANDS.iter().enumerate() {
-            if cmd.name.starts_with(filter)
-                || cmd.aliases.iter().any(|a| a.starts_with(filter))
-            {
+            if cmd.name.starts_with(filter) || cmd.aliases.iter().any(|a| a.starts_with(filter)) {
                 self.slash_matched.push(i);
             }
         }
@@ -328,8 +387,6 @@ impl AppState {
             .get(self.slash_selected)
             .and_then(|&i| BUILTIN_COMMANDS.get(i))
     }
-
-    // ── Scroll helpers ──
 
     fn is_at_tail(&self) -> bool {
         self.scroll_offset == TAIL_SENTINEL
@@ -415,7 +472,6 @@ impl AppState {
                 if let Some(msg) = self.queued_messages.pop_front() {
                     self.input_clear();
                     self.add_message("user", &msg, None);
-                    // Will be sent by caller
                 }
             }
             AppEvent::ToolResult { name, result } => {
@@ -519,39 +575,17 @@ impl AppState {
     }
 }
 
-impl Default for AppState {
-    fn default() -> Self {
-        Self {
-            messages: Vec::new(),
-            thinking_buffer: String::new(),
-            text_buffer: String::new(),
-            mode: AppMode::Chat,
-            input: String::new(),
-            input_cursor_char: 0,
-            should_quit: false,
-            thinking_visible: true,
-            verbosity: Verbosity::Normal,
-            is_streaming: false,
-            queued_messages: VecDeque::new(),
-            scroll_offset: TAIL_SENTINEL,
-            pending_scroll_delta: 0,
-            approval_selected: ApprovalChoice::Allow,
-            approval_feedback: String::new(),
-            approval_feedback_cursor: 0,
-            slash_filter: String::new(),
-            slash_selected: 0,
-            slash_matched: Vec::new(),
-        }
-    }
-}
-
-// ── Drawing ──
-
 pub fn draw(f: &mut Frame, state: &mut AppState) {
-    let bottom_height = match &state.mode {
+    let theme = state.theme().clone();
+    let status_height: u16 = 1;
+
+    let input_area_height = match &state.mode {
         AppMode::Approval { .. } => {
-            let feedback_bonus =
-                if state.approval_selected == ApprovalChoice::EditFeedback { 3 } else { 0 };
+            let feedback_bonus = if state.approval_selected == ApprovalChoice::EditFeedback {
+                3
+            } else {
+                0
+            };
             1 + feedback_bonus + 3
         }
         _ => 3,
@@ -559,10 +593,23 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(bottom_height)])
+        .constraints([
+            Constraint::Min(3),
+            Constraint::Length(input_area_height),
+            Constraint::Length(status_height),
+        ])
         .split(f.area());
 
-    draw_messages(f, state, chunks[0], chunks[0].width as usize);
+    let show_welcome = state.messages.is_empty()
+        && state.thinking_buffer.is_empty()
+        && state.text_buffer.is_empty()
+        && !state.is_streaming;
+
+    if show_welcome {
+        draw_welcome(f, &theme, chunks[0]);
+    } else {
+        draw_messages(f, state, chunks[0], chunks[0].width as usize);
+    }
 
     match &state.mode {
         AppMode::Approval { .. } => {
@@ -578,31 +625,32 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
                 .constraints(constraints)
                 .split(chunks[1]);
 
-            draw_approval_choices(f, state, approval_chunks[0]);
+            draw_approval_choices(f, state, approval_chunks[0], &theme);
             let input_idx = if has_feedback {
-                draw_feedback_input(f, state, approval_chunks[1]);
+                draw_feedback_input(f, state, approval_chunks[1], &theme);
                 2
             } else {
                 1
             };
-            draw_input(f, state, approval_chunks[input_idx]);
+            draw_input(f, state, approval_chunks[input_idx], &theme);
         }
         _ => {
-            draw_input(f, state, chunks[1]);
+            draw_input(f, state, chunks[1], &theme);
         }
     }
 
+    draw_status_bar(f, state, chunks[2], &theme);
+
     if state.mode == AppMode::SlashMenu {
-        draw_slash_menu(f, state, f.area());
+        draw_slash_menu(f, state, f.area(), &theme);
     }
 
     if !state.queued_messages.is_empty() {
-        let queue_height = 1;
         let queue_area = Rect {
             x: f.area().x,
             y: f.area().bottom().saturating_sub(4),
             width: f.area().width,
-            height: queue_height,
+            height: 1,
         };
         let label = if state.queued_messages.len() == 1 {
             "1 queued message".to_string()
@@ -611,11 +659,139 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         };
         let queue_para = Paragraph::new(Line::from(Span::styled(
             format!("  \u{25B8} {} (Enter to edit, Esc to cancel)", label),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme.warning),
         )));
         f.render_widget(Clear, queue_area);
         f.render_widget(queue_para, queue_area);
     }
+}
+
+fn draw_welcome(f: &mut Frame, theme: &Theme, area: Rect) {
+    let logo = logo_lines();
+    let logo_height = logo.len() as u16;
+    let tagline = APP_TAGLINE;
+    let tips = [
+        "Type a message to start a conversation",
+        "/ for commands  \u{2502}  ? for help  \u{2502}  Esc to interrupt",
+    ];
+
+    let total_content = logo_height + 1 + 1 + 1 + tips.len() as u16;
+    let top_pad = area.height.saturating_sub(total_content) / 2;
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    for _ in 0..top_pad {
+        lines.push(Line::from(""));
+    }
+
+    let logo_width: u16 = logo
+        .iter()
+        .map(|l| UnicodeWidthStr::width(*l) as u16)
+        .max()
+        .unwrap_or(30);
+    let center_offset = area.width.saturating_sub(logo_width) / 2;
+    let pad_str = " ".repeat(center_offset as usize);
+
+    for line in &logo {
+        let trimmed = line.trim_end();
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", pad_str, trimmed),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+
+    lines.push(Line::from(""));
+    let tagline_width = UnicodeWidthStr::width(tagline) as u16;
+    lines.push(Line::from(Span::styled(
+        format!(
+            "{}{}",
+            " ".repeat(area.width.saturating_sub(tagline_width) as usize / 2),
+            tagline
+        ),
+        Style::default().fg(theme.muted),
+    )));
+    lines.push(Line::from(""));
+
+    for tip in &tips {
+        let tip_width = UnicodeWidthStr::width(*tip) as u16;
+        lines.push(Line::from(Span::styled(
+            format!(
+                "{}{}",
+                " ".repeat(area.width.saturating_sub(tip_width) as usize / 2),
+                tip
+            ),
+            Style::default().fg(theme.status_muted),
+        )));
+    }
+
+    f.render_widget(Paragraph::new(lines), area);
+}
+
+fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
+    let mode_indicator = match &state.mode {
+        AppMode::Chat => "\u{25CB} idle",
+        AppMode::Streaming => "\u{25CF} streaming",
+        AppMode::Approval { .. } => "\u{25D0} approval",
+        AppMode::SlashMenu => "\u{25CB} idle",
+    };
+    let mode_style = match &state.mode {
+        AppMode::Streaming => Style::default().fg(theme.success),
+        AppMode::Approval { .. } => Style::default().fg(theme.warning),
+        _ => Style::default().fg(theme.status_muted),
+    };
+
+    let msg_count = state.messages.len();
+
+    let left_parts: Vec<Span> = vec![
+        Span::styled(
+            format!(" {} ", APP_NAME),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("\u{2502}", Style::default().fg(theme.status_muted)),
+        Span::styled(
+            format!(" {} ", state.model_name),
+            Style::default().fg(theme.status_fg),
+        ),
+        Span::styled("\u{2502}", Style::default().fg(theme.status_muted)),
+        Span::styled(format!(" {} ", mode_indicator), mode_style),
+        Span::styled("\u{2502}", Style::default().fg(theme.status_muted)),
+        Span::styled(
+            format!(" {} msgs ", msg_count),
+            Style::default().fg(theme.status_muted),
+        ),
+    ];
+
+    let thinking_label = if state.thinking_visible { "on" } else { "off" };
+    let right_parts: Vec<Span> = vec![
+        Span::styled(
+            format!("verbose: {} ", state.verbosity.label()),
+            Style::default().fg(theme.status_muted),
+        ),
+        Span::styled("\u{2502}", Style::default().fg(theme.status_muted)),
+        Span::styled(
+            format!(" thinking: {} ", thinking_label),
+            Style::default().fg(theme.status_muted),
+        ),
+    ];
+
+    let left_width: usize = left_parts.iter().map(|s| s.content.len()).sum();
+    let right_width: usize = right_parts.iter().map(|s| s.content.len()).sum();
+    let gap = area.width as usize;
+    let fill = gap.saturating_sub(left_width + right_width);
+
+    let mut spans: Vec<Span> = left_parts;
+    spans.push(Span::styled(
+        " ".repeat(fill),
+        Style::default().fg(theme.status_muted),
+    ));
+    spans.extend(right_parts);
+
+    let status_line = Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.status_bg));
+    f.render_widget(status_line, area);
 }
 
 fn draw_messages(f: &mut Frame, state: &mut AppState, area: Rect, terminal_width: usize) {
@@ -654,6 +830,7 @@ fn draw_messages(f: &mut Frame, state: &mut AppState, area: Rect, terminal_width
     let paragraph = Paragraph::new(padded);
     f.render_widget(paragraph, area);
 
+    let theme = state.theme();
     if content_height > visible_height && area.width > 1 {
         let scrollable = content_height.saturating_sub(visible_height);
         let pos = if at_tail {
@@ -668,37 +845,44 @@ fn draw_messages(f: &mut Frame, state: &mut AppState, area: Rect, terminal_width
             .begin_symbol(None)
             .end_symbol(None)
             .track_symbol(Some("\u{2502}"))
-            .track_style(Style::default().fg(Color::DarkGray))
+            .track_style(Style::default().fg(theme.rail))
             .thumb_symbol("\u{2503}")
-            .thumb_style(Style::default().fg(Color::White))
+            .thumb_style(Style::default().fg(theme.muted))
             .render(area, f.buffer_mut(), &mut sb_state);
     }
 }
 
-fn draw_input(f: &mut Frame, state: &AppState, area: Rect) {
+fn draw_input(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
     let is_approval = matches!(state.mode, AppMode::Approval { .. });
     let border_color = if is_approval {
-        Color::Yellow
+        theme.warning
     } else if state.is_streaming {
-        Color::Cyan
+        theme.border_active
     } else {
-        Color::DarkGray
+        theme.border
     };
 
     let prompt_width = UnicodeWidthStr::width(PROMPT) as u16;
 
     let input_spans = if state.is_streaming && !state.input.is_empty() {
         vec![
-            Span::styled(PROMPT, Style::default().fg(COLOR_PROMPT).add_modifier(Modifier::BOLD)),
             Span::styled(
-                state.input.as_str(),
-                Style::default().fg(Color::DarkGray),
+                PROMPT,
+                Style::default()
+                    .fg(theme.prompt)
+                    .add_modifier(Modifier::BOLD),
             ),
+            Span::styled(state.input.as_str(), Style::default().fg(theme.muted)),
         ]
     } else {
         vec![
-            Span::styled(PROMPT, Style::default().fg(COLOR_PROMPT).add_modifier(Modifier::BOLD)),
-            Span::styled(state.input.as_str(), Style::default().fg(COLOR_INPUT)),
+            Span::styled(
+                PROMPT,
+                Style::default()
+                    .fg(theme.prompt)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(state.input.as_str(), Style::default().fg(theme.input)),
         ]
     };
 
@@ -720,7 +904,7 @@ fn draw_input(f: &mut Frame, state: &AppState, area: Rect) {
     f.set_cursor_position((area.x + prompt_width + display_col, area.y + 1));
 }
 
-fn draw_approval_choices(f: &mut Frame, state: &AppState, area: Rect) {
+fn draw_approval_choices(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
     let selected = state.approval_selected;
     let choices: Vec<Span> = ApprovalChoice::ALL
         .iter()
@@ -737,21 +921,21 @@ fn draw_approval_choices(f: &mut Frame, state: &AppState, area: Rect) {
             } else {
                 format!("   {} [{}]   ", label, hint)
             };
-            vec![Span::styled(styled, choice.style(sel))]
+            vec![Span::styled(styled, choice.style(sel, theme))]
         })
         .collect();
     let choices_line = Paragraph::new(Line::from(choices));
     f.render_widget(choices_line, area);
 }
 
-fn draw_feedback_input(f: &mut Frame, state: &AppState, area: Rect) {
+fn draw_feedback_input(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
     let feedback_block = Block::default()
         .borders(Borders::ALL)
         .title(" Feedback ")
-        .border_style(Style::default().fg(COLOR_TOOL));
+        .border_style(Style::default().fg(theme.warning));
     let feedback_para = Paragraph::new(Span::styled(
         state.approval_feedback.as_str(),
-        Style::default().fg(COLOR_INPUT),
+        Style::default().fg(theme.input),
     ))
     .block(feedback_block);
     f.render_widget(feedback_para, area);
@@ -766,16 +950,16 @@ fn draw_feedback_input(f: &mut Frame, state: &AppState, area: Rect) {
     f.set_cursor_position((area.x + 1 + fb_col, area.y + 1));
 }
 
-fn draw_slash_menu(f: &mut Frame, state: &AppState, area: Rect) {
+fn draw_slash_menu(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
     if state.slash_matched.is_empty() {
         return;
     }
 
-    let menu_width = 40u16;
+    let menu_width: u16 = 48;
     let menu_height = (state.slash_matched.len().min(8) as u16) + 2;
     let menu_area = Rect {
         x: area.x + 2,
-        y: area.bottom().saturating_sub(3 + menu_height as u16),
+        y: area.bottom().saturating_sub(3 + menu_height),
         width: menu_width.min(area.width),
         height: menu_height,
     };
@@ -783,7 +967,7 @@ fn draw_slash_menu(f: &mut Frame, state: &AppState, area: Rect) {
     f.render_widget(Clear, menu_area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(COLOR_TOOL));
+        .border_style(Style::default().fg(theme.border));
     f.render_widget(block, menu_area);
 
     let inner = Rect {
@@ -793,6 +977,7 @@ fn draw_slash_menu(f: &mut Frame, state: &AppState, area: Rect) {
         height: menu_area.height.saturating_sub(2),
     };
 
+    let name_col_width = 20usize;
     let items: Vec<Line> = state
         .slash_matched
         .iter()
@@ -806,21 +991,49 @@ fn draw_slash_menu(f: &mut Frame, state: &AppState, area: Rect) {
                 format!("{} ({})", cmd.name, cmd.aliases.join(", "))
             };
             if sel {
+                let desc = cmd.description;
+                let name_padded = format!("{:<width$}", name_str, width = name_col_width);
+                let desc_display = if inner.width as usize > name_col_width + 4 {
+                    let max_desc = inner.width as usize - name_col_width - 4;
+                    let d: String = desc.chars().take(max_desc).collect();
+                    d
+                } else {
+                    String::new()
+                };
                 Line::from(vec![
                     Span::styled(
-                        format!(" \u{25B8} {}", name_str),
-                        Style::default().fg(Color::Black).bg(COLOR_TOOL).add_modifier(Modifier::BOLD),
+                        format!(" \u{25B8} {}", name_padded),
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(theme.tool)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
-                        " ".repeat(inner.width as usize / 2),
-                        Style::default().bg(COLOR_TOOL),
+                        desc_display,
+                        Style::default().fg(Color::Black).bg(theme.tool),
+                    ),
+                    Span::styled(
+                        " ".repeat(inner.width as usize),
+                        Style::default().bg(theme.tool),
                     ),
                 ])
             } else {
-                Line::from(Span::styled(
-                    format!("   {}", name_str),
-                    Style::default().fg(COLOR_TOOL),
-                ))
+                let desc = cmd.description;
+                let name_padded = format!("{:<width$}", name_str, width = name_col_width);
+                let desc_display = if inner.width as usize > name_col_width + 4 {
+                    let max_desc = inner.width as usize - name_col_width - 4;
+                    let d: String = desc.chars().take(max_desc).collect();
+                    d
+                } else {
+                    String::new()
+                };
+                Line::from(vec![
+                    Span::styled(
+                        format!("   {}", name_padded),
+                        Style::default().fg(theme.tool),
+                    ),
+                    Span::styled(desc_display, Style::default().fg(theme.muted)),
+                ])
             }
         })
         .collect();

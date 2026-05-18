@@ -112,7 +112,10 @@ impl MemoryManager {
         let sections: Vec<&str> = RE_DATE_SECTION.split(content).collect();
         let header = sections.first().unwrap_or(&"").to_string();
 
-        let headers: Vec<&str> = RE_DATE_HEADER.find_iter(content).map(|m| m.as_str()).collect();
+        let headers: Vec<&str> = RE_DATE_HEADER
+            .find_iter(content)
+            .map(|m| m.as_str())
+            .collect();
 
         let mut body_parts: Vec<String> = Vec::new();
         for (i, section) in sections.iter().enumerate().skip(1) {

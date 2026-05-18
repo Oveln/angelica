@@ -81,10 +81,7 @@ impl LlmClient {
             line_buf.push_str(&String::from_utf8_lossy(&chunk));
 
             while let Some(pos) = line_buf.find('\n') {
-                let line = line_buf[..pos]
-                    .trim_end_matches('\r')
-                    .trim()
-                    .to_string();
+                let line = line_buf[..pos].trim_end_matches('\r').trim().to_string();
                 line_buf.drain(..=pos);
 
                 if !line.starts_with("data: ") {
@@ -114,7 +111,10 @@ impl LlmClient {
         }
 
         if !line_buf.trim().is_empty() {
-            tracing::warn!("SSE stream ended with partial line: {} bytes remaining", line_buf.len());
+            tracing::warn!(
+                "SSE stream ended with partial line: {} bytes remaining",
+                line_buf.len()
+            );
         }
 
         let final_result = accumulator.finalize();
@@ -125,10 +125,21 @@ impl LlmClient {
 
 #[derive(Debug, Clone)]
 pub enum AppStreamEvent {
-    ThinkingDelta { delta: String },
-    TextDelta { delta: String },
-    ToolCallStart { index: usize, id: String, name: String },
-    ToolCallArgsDelta { index: usize, delta: String },
+    ThinkingDelta {
+        delta: String,
+    },
+    TextDelta {
+        delta: String,
+    },
+    ToolCallStart {
+        index: usize,
+        id: String,
+        name: String,
+    },
+    ToolCallArgsDelta {
+        index: usize,
+        delta: String,
+    },
     Done,
 }
 

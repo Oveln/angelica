@@ -29,12 +29,18 @@ impl SkillRegistry {
 
     pub fn discover(&mut self) {
         if !self.skills_dir.exists() {
-            tracing::info!("Skills directory does not exist: {}", self.skills_dir.display());
+            tracing::info!(
+                "Skills directory does not exist: {}",
+                self.skills_dir.display()
+            );
             return;
         }
 
         let Ok(entries) = std::fs::read_dir(&self.skills_dir) else {
-            tracing::warn!("Failed to read skills directory: {}", self.skills_dir.display());
+            tracing::warn!(
+                "Failed to read skills directory: {}",
+                self.skills_dir.display()
+            );
             return;
         };
 

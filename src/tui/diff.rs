@@ -1,9 +1,13 @@
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::constants::{COLOR_ASSISTANT, COLOR_INPUT, COLOR_RAIL, COLOR_TOOL};
+use super::theme::Theme;
 
-pub(super) fn render_diff_lines(preview: &str, max_width: usize) -> Vec<Line<'static>> {
+pub(super) fn render_diff_lines(
+    preview: &str,
+    max_width: usize,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
     let mut lines: Vec<Line> = Vec::new();
     let mut old_line: Option<usize> = None;
     let mut new_line: Option<usize> = None;
@@ -16,7 +20,7 @@ pub(super) fn render_diff_lines(preview: &str, max_width: usize) -> Vec<Line<'st
             lines.push(Line::from(Span::styled(
                 raw.to_string(),
                 Style::default()
-                    .fg(COLOR_ASSISTANT)
+                    .fg(theme.assistant)
                     .add_modifier(Modifier::BOLD),
             )));
             continue;
@@ -32,7 +36,7 @@ pub(super) fn render_diff_lines(preview: &str, max_width: usize) -> Vec<Line<'st
             }
             lines.push(Line::from(Span::styled(
                 raw.to_string(),
-                Style::default().fg(COLOR_TOOL),
+                Style::default().fg(theme.diff_hunk),
             )));
             continue;
         }
@@ -42,11 +46,19 @@ pub(super) fn render_diff_lines(preview: &str, max_width: usize) -> Vec<Line<'st
             let gutter = format_line_no(None, new_line);
             let fill = max_width.saturating_sub(content.len());
             let padded = format!("{}{}", content, " ".repeat(fill));
-            let bg = Color::Rgb(0, 40, 0);
-            let fg = Color::Rgb(100, 255, 100);
             lines.push(Line::from(vec![
-                Span::styled(format!("{gutter} + "), Style::default().fg(fg).bg(bg)),
-                Span::styled(padded, Style::default().fg(Color::White).bg(bg)),
+                Span::styled(
+                    format!("{gutter} + "),
+                    Style::default()
+                        .fg(theme.diff_added_fg)
+                        .bg(theme.diff_added_bg),
+                ),
+                Span::styled(
+                    padded,
+                    Style::default()
+                        .fg(ratatui::style::Color::White)
+                        .bg(theme.diff_added_bg),
+                ),
             ]));
             if let Some(n) = new_line.as_mut() {
                 *n += 1;
@@ -59,11 +71,19 @@ pub(super) fn render_diff_lines(preview: &str, max_width: usize) -> Vec<Line<'st
             let gutter = format_line_no(old_line, None);
             let fill = max_width.saturating_sub(content.len());
             let padded = format!("{}{}", content, " ".repeat(fill));
-            let bg = Color::Rgb(40, 0, 0);
-            let fg = Color::Rgb(255, 100, 100);
             lines.push(Line::from(vec![
-                Span::styled(format!("{gutter} - "), Style::default().fg(fg).bg(bg)),
-                Span::styled(padded, Style::default().fg(Color::White).bg(bg)),
+                Span::styled(
+                    format!("{gutter} - "),
+                    Style::default()
+                        .fg(theme.diff_removed_fg)
+                        .bg(theme.diff_removed_bg),
+                ),
+                Span::styled(
+                    padded,
+                    Style::default()
+                        .fg(ratatui::style::Color::White)
+                        .bg(theme.diff_removed_bg),
+                ),
             ]));
             if let Some(n) = old_line.as_mut() {
                 *n += 1;
@@ -75,8 +95,8 @@ pub(super) fn render_diff_lines(preview: &str, max_width: usize) -> Vec<Line<'st
             let content = &raw[1..];
             let gutter = format_line_no(None, new_line);
             lines.push(Line::from(vec![
-                Span::styled(format!("{gutter}   "), Style::default().fg(COLOR_RAIL)),
-                Span::styled(content.to_string(), Style::default().fg(COLOR_INPUT)),
+                Span::styled(format!("{gutter}   "), Style::default().fg(theme.rail)),
+                Span::styled(content.to_string(), Style::default().fg(theme.input)),
             ]));
             if let Some(n) = old_line.as_mut() {
                 *n += 1;
@@ -89,7 +109,7 @@ pub(super) fn render_diff_lines(preview: &str, max_width: usize) -> Vec<Line<'st
 
         lines.push(Line::from(Span::styled(
             raw.to_string(),
-            Style::default().fg(COLOR_TOOL),
+            Style::default().fg(theme.diff_hunk),
         )));
     }
 

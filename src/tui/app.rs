@@ -14,6 +14,7 @@ use crate::tui::ui::{AppMode, AppState, ApprovalChoice, BUILTIN_COMMANDS};
 pub async fn run_tui(
     mut app_event_rx: mpsc::Receiver<AppEvent>,
     user_action_tx: mpsc::Sender<UserAction>,
+    model_name: String,
 ) -> anyhow::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -23,7 +24,7 @@ pub async fn run_tui(
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let mut state = AppState::default();
+    let mut state = AppState::new(model_name);
     let mut reader = EventStream::new();
 
     loop {
@@ -144,7 +145,11 @@ async fn handle_chat_key(
 
             if state.is_streaming {
                 state.queued_messages.push_back(input.clone());
-                state.add_message("system", &format!("[queued: {}]", input.chars().take(40).collect::<String>()), None);
+                state.add_message(
+                    "system",
+                    &format!("[queued: {}]", input.chars().take(40).collect::<String>()),
+                    None,
+                );
             } else {
                 state.add_message("user", &input, None);
                 let _ = tx.send(UserAction::SendMessage { content: input }).await;
@@ -264,9 +269,9 @@ async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::Sende
 
     let cmd_lower = cmd_name.to_lowercase();
 
-    let matched = BUILTIN_COMMANDS.iter().find(|c| {
-        c.name == cmd_lower || c.aliases.iter().any(|a| *a == cmd_lower)
-    });
+    let matched = BUILTIN_COMMANDS
+        .iter()
+        .find(|c| c.name == cmd_lower || c.aliases.iter().any(|a| *a == cmd_lower));
 
     if let Some(matched_cmd) = matched {
         match matched_cmd.name {
@@ -278,7 +283,10 @@ async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::Sende
                     } else {
                         format!(" ({})", c.aliases.join(", "))
                     };
-                    help.push_str(&format!("  /{}{}\n    {}\n", c.name, aliases, c.description));
+                    help.push_str(&format!(
+                        "  /{}{}\n    {}\n",
+                        c.name, aliases, c.description
+                    ));
                 }
                 state.add_message("system", &help, None);
             }
@@ -310,7 +318,8 @@ async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::Sende
                 );
             }
             "model" => {
-                state.add_message("system", "deepseek-v4-flash", None);
+                let model = state.model_name.clone();
+                state.add_message("system", &model, None);
             }
             "history" | "h" => {
                 let count = state.messages.len();
@@ -322,17 +331,16 @@ async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::Sende
                 );
             }
             _ => {
-                state.add_message(
-                    "system",
-                    &format!("Unknown command: /{}", cmd_name),
-                    None,
-                );
+                state.add_message("system", &format!("Unknown command: /{}", cmd_name), None);
             }
         }
     } else {
         state.add_message(
             "system",
-            &format!("Unknown command: /{}. Type /help for available commands.", cmd_name),
+            &format!(
+                "Unknown command: /{}. Type /help for available commands.",
+                cmd_name
+            ),
             None,
         );
     }
@@ -405,7 +413,9 @@ async fn handle_approval_key(
                         state.handle_event(&AppEvent::CommandResult {
                             output: output.clone(),
                         });
-                        let _ = tx.send(UserAction::ApprovePendingWithResult { output }).await;
+                        let _ = tx
+                            .send(UserAction::ApprovePendingWithResult { output })
+                            .await;
                     }
                 } else {
                     let _ = tx.send(UserAction::ApprovePending).await;
@@ -439,7 +449,9 @@ async fn handle_approval_key(
                     state.handle_event(&AppEvent::CommandResult {
                         output: output.clone(),
                     });
-                    let _ = tx.send(UserAction::ApprovePendingWithResult { output }).await;
+                    let _ = tx
+                        .send(UserAction::ApprovePendingWithResult { output })
+                        .await;
                 }
             } else {
                 let _ = tx.send(UserAction::ApprovePending).await;

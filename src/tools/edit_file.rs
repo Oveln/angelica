@@ -81,14 +81,22 @@ impl Tool for EditFileTool {
                 "Search string found {} times in {} (at lines {}). Provide a longer/more specific search string to uniquely identify the location.",
                 count,
                 path.display(),
-                line_numbers.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ")
+                line_numbers
+                    .iter()
+                    .map(|n| n.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
 
         let updated = contents.replacen(search, replace, 1);
         let diff = make_unified_diff(path_str, &contents, &updated);
 
-        Ok(Some(format!("{}\nReplaced 1 occurrence in {}", diff, path.display())))
+        Ok(Some(format!(
+            "{}\nReplaced 1 occurrence in {}",
+            diff,
+            path.display()
+        )))
     }
 
     async fn execute(&self, args: Value) -> anyhow::Result<String> {

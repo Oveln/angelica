@@ -34,8 +34,13 @@ pub(super) struct GroupedEdit {
 }
 
 pub(super) enum ToolCallGroup {
-    Single { tc: ToolCall },
-    BatchedEdits { path: String, edits: Vec<GroupedEdit> },
+    Single {
+        tc: ToolCall,
+    },
+    BatchedEdits {
+        path: String,
+        edits: Vec<GroupedEdit>,
+    },
 }
 
 /// Group consecutive `edit_file` calls that target the same file.

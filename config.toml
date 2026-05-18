@@ -5,6 +5,7 @@ max_tokens = 4096
 temperature = 0.7
 thinking = true
 reasoning_effort = "high"
+max_iterations = 15
 
 [memory]
 agent_memory_path = "data/agent_memory.md"
