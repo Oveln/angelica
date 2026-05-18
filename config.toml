@@ -1,0 +1,25 @@
+[llm]
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com"
+max_tokens = 4096
+temperature = 0.7
+thinking = true
+reasoning_effort = "high"
+
+[memory]
+agent_memory_path = "data/agent_memory.md"
+user_profile_path = "data/user_profile.md"
+soul_path = "data/SOUL.md"
+max_file_size_kb = 32
+
+[skills]
+directory = "skills"
+
+[session]
+directory = "data/sessions"
+
+# Example MCP server configs:
+# [mcp.servers.filesystem]
+# transport = "stdio"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]

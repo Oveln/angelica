@@ -1,0 +1,51 @@
+[package]
+name = "angelica"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# HTTP client (LLM API + SSE streaming)
+reqwest = { version = "0.13.3", features = ["stream", "json"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# TOML config
+toml = "1.1.2"
+
+# TUI
+ratatui = "0.30.0"
+crossterm = { version = "0.29.0", features = ["event-stream"] }
+
+# Regex
+regex = "1"
+
+# Chrono for timestamps
+chrono = "0.4"
+
+# CLI args
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async trait
+async-trait = "0.1"
+
+# anyhow for error handling
+anyhow = "1"
+thiserror = "2"
+unicode-width = "0.2.2"
+
+# Diff generation
+similar = "2"
+
+[dev-dependencies]
+tempfile = "3"
