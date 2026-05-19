@@ -104,6 +104,7 @@ impl SessionManager {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct SessionEntry {
     pub session_id: String,
     pub path: PathBuf,

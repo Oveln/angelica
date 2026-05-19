@@ -68,6 +68,11 @@ pub static BUILTIN_COMMANDS: &[SlashCommand] = &[
         aliases: &["h"],
         description: "Show recent history",
     },
+    SlashCommand {
+        name: "resume",
+        aliases: &["r"],
+        description: "Resume a previous session",
+    },
 ];
 
 #[derive(Debug, Clone)]

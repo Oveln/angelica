@@ -101,6 +101,40 @@ impl AppState {
             AppEvent::Error { message } => {
                 self.add_chat("system", &format!("Error: {}", message), None);
             }
+            AppEvent::SessionList { sessions } => {
+                if let AppMode::SessionPicker(ref mut sp) = self.mode {
+                    sp.sessions = sessions.clone();
+                    sp.rebuild_matches();
+                }
+            }
+            AppEvent::SessionLoaded { messages } => {
+                self.messages.clear();
+                self.thinking_buffer.clear();
+                self.text_buffer.clear();
+                self.is_streaming = false;
+
+                for msg in messages {
+                    match msg.role.as_str() {
+                        "user" => {
+                            self.add_chat("user", msg.content.as_deref().unwrap_or(""), None);
+                        }
+                        "assistant" => {
+                            let thinking = msg.reasoning_content.clone();
+                            let content = msg.content.clone().unwrap_or_default();
+                            self.add_chat("assistant", &content, thinking);
+                        }
+                        _ => {}
+                    }
+                }
+
+                self.mode = AppMode::Chat;
+                self.scroll.to_bottom();
+                self.add_chat(
+                    "system",
+                    &format!("Session restored ({} messages)", self.messages.len()),
+                    None,
+                );
+            }
         }
     }
 }

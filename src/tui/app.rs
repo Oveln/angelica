@@ -170,6 +170,14 @@ async fn handle_key(
         return;
     }
 
+    if matches!(state.mode, AppMode::SessionPicker(_)) {
+        let action = mode::session::handle_key(state, key, tx).await;
+        if let mode::session::SessionAction::ResumeSession(id) = action {
+            let _ = tx.send(UserAction::ResumeSession { session_id: id }).await;
+        }
+        return;
+    }
+
     match state.mode {
         AppMode::Approval(_) => {
             mode::approval::handle_key(state, key, tx).await;

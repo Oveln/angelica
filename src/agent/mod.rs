@@ -578,6 +578,46 @@ async fn run_loop(
             UserAction::ClearHistory => {
                 agent.clear_history();
             }
+            UserAction::ResumeSession { session_id } => {
+                if session_id.is_empty() {
+                    match agent.sessions.query_sessions("", 20) {
+                        Ok(sessions) => {
+                            let _ = event_tx.send(AppEvent::SessionList { sessions }).await;
+                        }
+                        Err(e) => {
+                            let _ = event_tx
+                                .send(AppEvent::Error {
+                                    message: format!("Failed to query sessions: {}", e),
+                                })
+                                .await;
+                        }
+                    }
+                } else {
+                    match agent.sessions.load_session_messages(&session_id) {
+                        Ok(messages) => {
+                            agent.history.clear();
+                            for msg in &messages {
+                                agent.history.push(msg.clone());
+                            }
+                            agent.tool_queue.clear();
+                            agent.pending_approval = None;
+                            agent.iteration = 0;
+                            agent.dirty = true;
+                            let _ = event_tx.send(AppEvent::SessionLoaded { messages }).await;
+                        }
+                        Err(e) => {
+                            let _ = event_tx
+                                .send(AppEvent::Error {
+                                    message: format!(
+                                        "Failed to load session {}: {}",
+                                        session_id, e
+                                    ),
+                                })
+                                .await;
+                        }
+                    }
+                }
+            }
             UserAction::Quit => {
                 break;
             }

@@ -1,3 +1,5 @@
+use crate::session::SessionEntry;
+
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     ThinkingDelta {
@@ -35,6 +37,13 @@ pub enum AppEvent {
     Error {
         message: String,
     },
+
+    SessionList {
+        sessions: Vec<SessionEntry>,
+    },
+    SessionLoaded {
+        messages: Vec<crate::llm::types::ChatMessage>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -43,5 +52,6 @@ pub enum UserAction {
     ApprovePending,
     RejectTool { feedback: Option<String> },
     ClearHistory,
+    ResumeSession { session_id: String },
     Quit,
 }
