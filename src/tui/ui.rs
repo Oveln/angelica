@@ -10,6 +10,7 @@ use ratatui::{
         StatefulWidget,
     },
 };
+use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
 
 use super::render::build_all_lines;
@@ -142,24 +143,55 @@ pub static BUILTIN_COMMANDS: &[SlashCommand] = &[
 ];
 
 #[derive(Debug, Clone)]
-pub struct DisplayMessage {
-    pub role: String,
-    pub content: String,
-    pub thinking: Option<String>,
-    pub collapsed: bool,
-    pub hidden: bool,
+pub enum DisplayMessage {
+    Chat {
+        role: String,
+        content: String,
+        thinking: Option<String>,
+        collapsed: bool,
+        hidden: bool,
+    },
+    Tool {
+        call_id: String,
+        name: String,
+        args_display: String,
+        result: Option<String>,
+        collapsed: bool,
+        hidden: bool,
+    },
+    Diff {
+        content: String,
+        hidden: bool,
+    },
+}
+
+impl DisplayMessage {
+    pub fn is_hidden(&self) -> bool {
+        match self {
+            DisplayMessage::Chat { hidden, .. }
+            | DisplayMessage::Tool { hidden, .. }
+            | DisplayMessage::Diff { hidden, .. } => *hidden,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppMode {
     Chat,
     Approval {
+        tool_call_id: String,
+        tool_name: String,
         tool_label: String,
-        is_tty_command: bool,
-        command: Option<String>,
     },
     Streaming,
     SlashMenu,
+}
+
+pub struct ClickRange {
+    pub line: usize,
+    pub col_start: usize,
+    pub col_end: usize,
+    pub msg_index: usize,
 }
 
 pub struct AppState {
@@ -189,6 +221,72 @@ pub struct AppState {
 
     pub model_name: String,
     theme: Theme,
+
+    pub clickable_ranges: Vec<ClickRange>,
+    pub hovered_msg_index: Option<usize>,
+    pub content_top: usize,
+    pub content_height: usize,
+    pub messages_area: Rect,
+
+    pub selection: Option<(usize, usize, usize, usize)>,
+    pub cached_line_texts: Vec<String>,
+    pub drag_scroll_pos: Option<(u16, u16)>,
+    mouse_down_pos: Option<(usize, usize)>,
+    mouse_down_on_toggle: Option<(usize, usize)>,
+}
+
+fn char_to_byte(char_idx: usize, s: &str) -> usize {
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len())
+}
+
+fn display_width_to_char_idx(width: usize, s: &str) -> usize {
+    let mut w = 0;
+    for (ci, c) in s.char_indices() {
+        if w >= width {
+            return ci;
+        }
+        w += c.width().unwrap_or(0);
+    }
+    s.len()
+}
+
+fn insert_char(buf: &mut String, cursor: &mut usize, c: char) {
+    let pos = char_to_byte(*cursor, buf);
+    buf.insert(pos, c);
+    *cursor += 1;
+}
+
+fn delete_before(buf: &mut String, cursor: &mut usize) {
+    if *cursor == 0 {
+        return;
+    }
+    *cursor -= 1;
+    let pos = char_to_byte(*cursor, buf);
+    let len = buf[pos..].chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+    buf.drain(pos..pos + len);
+}
+
+fn delete_after(buf: &mut String, cursor: &mut usize) {
+    let total = buf.chars().count();
+    if *cursor >= total {
+        return;
+    }
+    let pos = char_to_byte(*cursor, buf);
+    let len = buf[pos..].chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+    buf.drain(pos..pos + len);
+}
+
+fn find_tool_by_call_id_mut<'a>(
+    messages: &'a mut [DisplayMessage],
+    call_id: &str,
+) -> Option<&'a mut DisplayMessage> {
+    messages.iter_mut().rev().find(|m| match m {
+        DisplayMessage::Tool { call_id: cid, .. } => cid == call_id,
+        _ => false,
+    })
 }
 
 impl Default for AppState {
@@ -215,6 +313,16 @@ impl Default for AppState {
             slash_matched: Vec::new(),
             model_name: String::new(),
             theme: Theme::default(),
+            clickable_ranges: Vec::new(),
+            hovered_msg_index: None,
+            content_top: 0,
+            content_height: 0,
+            messages_area: Rect::default(),
+            selection: None,
+            cached_line_texts: Vec::new(),
+            drag_scroll_pos: None,
+            mouse_down_pos: None,
+            mouse_down_on_toggle: None,
         }
     }
 }
@@ -231,8 +339,8 @@ impl AppState {
         &self.theme
     }
 
-    pub fn add_message(&mut self, role: &str, content: &str, thinking: Option<String>) {
-        self.messages.push(DisplayMessage {
+    pub fn add_chat(&mut self, role: &str, content: &str, thinking: Option<String>) {
+        self.messages.push(DisplayMessage::Chat {
             role: role.to_string(),
             content: content.to_string(),
             thinking,
@@ -241,8 +349,44 @@ impl AppState {
         });
     }
 
-    pub fn filtered_messages(&self) -> Vec<&DisplayMessage> {
-        self.messages.iter().filter(|m| !m.hidden).collect()
+    pub fn add_tool_call(&mut self, call_id: String, name: String, args_display: String) {
+        self.messages.push(DisplayMessage::Tool {
+            call_id,
+            name,
+            args_display,
+            result: None,
+            collapsed: true,
+            hidden: false,
+        });
+    }
+
+    pub fn complete_tool(&mut self, call_id: &str, result: String, force_collapsed: bool) {
+        if let Some(DisplayMessage::Tool {
+            result: r,
+            collapsed,
+            hidden,
+            ..
+        }) = find_tool_by_call_id_mut(&mut self.messages, call_id)
+        {
+            *r = Some(result);
+            *collapsed = force_collapsed;
+            *hidden = false;
+        }
+    }
+
+    pub fn hide_tool(&mut self, call_id: &str) {
+        if let Some(DisplayMessage::Tool { hidden, .. }) =
+            find_tool_by_call_id_mut(&mut self.messages, call_id)
+        {
+            *hidden = true;
+        }
+    }
+
+    pub fn add_diff(&mut self, content: String) {
+        self.messages.push(DisplayMessage::Diff {
+            content,
+            hidden: false,
+        });
     }
 
     fn should_show_tool_result(&self, tool_name: &str) -> bool {
@@ -253,42 +397,16 @@ impl AppState {
         }
     }
 
-    fn should_show_tool_call(&self, _tool_name: &str) -> bool {
-        true
-    }
-
     pub fn input_insert(&mut self, c: char) {
-        let byte_pos = Self::char_to_byte(self.input_cursor_char, &self.input);
-        self.input.insert(byte_pos, c);
-        self.input_cursor_char += 1;
+        insert_char(&mut self.input, &mut self.input_cursor_char, c);
     }
 
     pub fn input_backspace(&mut self) {
-        if self.input_cursor_char == 0 {
-            return;
-        }
-        self.input_cursor_char -= 1;
-        let byte_pos = Self::char_to_byte(self.input_cursor_char, &self.input);
-        let char_len = self.input[byte_pos..]
-            .chars()
-            .next()
-            .map(|c| c.len_utf8())
-            .unwrap_or(0);
-        self.input.drain(byte_pos..byte_pos + char_len);
+        delete_before(&mut self.input, &mut self.input_cursor_char);
     }
 
     pub fn input_delete(&mut self) {
-        let total = self.input.chars().count();
-        if self.input_cursor_char >= total {
-            return;
-        }
-        let byte_pos = Self::char_to_byte(self.input_cursor_char, &self.input);
-        let char_len = self.input[byte_pos..]
-            .chars()
-            .next()
-            .map(|c| c.len_utf8())
-            .unwrap_or(0);
-        self.input.drain(byte_pos..byte_pos + char_len);
+        delete_after(&mut self.input, &mut self.input_cursor_char);
     }
 
     pub fn input_move_left(&mut self) {
@@ -313,23 +431,18 @@ impl AppState {
     }
 
     pub fn feedback_insert(&mut self, c: char) {
-        let byte_pos = Self::char_to_byte(self.approval_feedback_cursor, &self.approval_feedback);
-        self.approval_feedback.insert(byte_pos, c);
-        self.approval_feedback_cursor += 1;
+        insert_char(
+            &mut self.approval_feedback,
+            &mut self.approval_feedback_cursor,
+            c,
+        );
     }
 
     pub fn feedback_backspace(&mut self) {
-        if self.approval_feedback_cursor == 0 {
-            return;
-        }
-        self.approval_feedback_cursor -= 1;
-        let byte_pos = Self::char_to_byte(self.approval_feedback_cursor, &self.approval_feedback);
-        let char_len = self.approval_feedback[byte_pos..]
-            .chars()
-            .next()
-            .map(|c| c.len_utf8())
-            .unwrap_or(0);
-        self.approval_feedback.drain(byte_pos..byte_pos + char_len);
+        delete_before(
+            &mut self.approval_feedback,
+            &mut self.approval_feedback_cursor,
+        );
     }
 
     pub fn feedback_move_left(&mut self) {
@@ -348,20 +461,235 @@ impl AppState {
         self.approval_feedback_cursor = 0;
     }
 
-    pub fn toggle_last_collapsed(&mut self) {
-        for msg in self.messages.iter_mut().rev() {
-            if msg.collapsed {
-                msg.collapsed = false;
+    fn format_tool_args(&self, name: &str, arguments: &str) -> String {
+        match name {
+            "run_command" => {
+                let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
+                let cmd = args["command"].as_str().unwrap_or("?");
+                format!("$ {}", cmd)
+            }
+            "read_file" => {
+                let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
+                let path = args["path"].as_str().unwrap_or("?");
+                format!("read {}", path)
+            }
+            "write_file" => {
+                let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
+                let path = args["path"].as_str().unwrap_or("?");
+                format!("write {}", path)
+            }
+            "edit_file" => {
+                let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
+                let path = args["path"].as_str().unwrap_or("?");
+                if let Some(count) = args["count"].as_u64() {
+                    format!("edit {} ({} changes)", path, count)
+                } else {
+                    format!("edit {}", path)
+                }
+            }
+            "list_dir" => {
+                let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
+                let path = args["path"].as_str().unwrap_or(".");
+                format!("ls {}", path)
+            }
+            _ => name.to_string(),
+        }
+    }
+
+    pub fn handle_mouse_down(&mut self, row: u16, col: u16) {
+        let abs = self.screen_to_content(row);
+        let (abs, col) = match abs {
+            Some(v) => (v, col as usize),
+            None => return,
+        };
+        self.mouse_down_pos = Some((abs, col));
+        self.mouse_down_on_toggle = None;
+
+        for range in self.clickable_ranges.iter() {
+            if abs == range.line && col >= range.col_start && col < range.col_end {
+                self.mouse_down_on_toggle = Some((abs, col));
                 return;
             }
         }
     }
 
-    fn char_to_byte(char_idx: usize, s: &str) -> usize {
-        s.char_indices()
-            .nth(char_idx)
-            .map(|(i, _)| i)
-            .unwrap_or(s.len())
+    pub fn handle_mouse_drag(&mut self, row: u16, col: u16) {
+        if self.mouse_down_on_toggle.is_some() {
+            self.mouse_down_on_toggle = None;
+        }
+
+        let Some((start_line, start_col)) = self.mouse_down_pos else {
+            return;
+        };
+
+        let area = self.messages_area;
+        let col_usize = col as usize;
+        let at_edge = row <= area.y || row >= area.y + area.height;
+
+        // Scroll at edges during active selection
+        if self.selection.is_some() && at_edge {
+            if row <= area.y {
+                self.scroll_up(1);
+            } else {
+                self.scroll_down(1);
+            }
+            self.drag_scroll_pos = Some((row, col));
+        } else if !at_edge {
+            self.drag_scroll_pos = None;
+        }
+
+        // Clamp to viewport and compute content position
+        let clamped_row = row.clamp(area.y, area.y + area.height.saturating_sub(1));
+        let abs = match self.screen_to_content(clamped_row) {
+            Some(v) => v,
+            None => return,
+        };
+
+        if self.selection.is_none() && (abs != start_line || col_usize.abs_diff(start_col) > 2) {
+            self.selection = Some((start_line, start_col, abs, col_usize));
+        } else if self.selection.is_some() {
+            let (s_line, s_col, _, _) = self.selection.unwrap();
+            self.selection = Some((s_line, s_col, abs, col_usize));
+        }
+    }
+
+    pub fn handle_mouse_up(&mut self) -> Option<String> {
+        if let Some((_line, _col)) = self.mouse_down_on_toggle.take() {
+            for range in self.clickable_ranges.iter() {
+                if _line == range.line && _col >= range.col_start && _col < range.col_end {
+                    self.toggle_by_index(range.msg_index);
+                    self.hovered_msg_index = None;
+                    break;
+                }
+            }
+            return None;
+        }
+
+        let copied = if let Some(sel) = self.selection.take() {
+            let (sl, sc, el, ec) = sel;
+            if sl != el || sc != ec {
+                Some(self.extract_selected_text(sl, sc, el, ec))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        self.mouse_down_pos = None;
+        self.mouse_down_on_toggle = None;
+        self.drag_scroll_pos = None;
+        copied
+    }
+
+    fn extract_selected_text(
+        &self,
+        start_line: usize,
+        start_col: usize,
+        end_line: usize,
+        end_col: usize,
+    ) -> String {
+        let (sl, sc, el, ec) =
+            if start_line < end_line || (start_line == end_line && start_col <= end_col) {
+                (start_line, start_col, end_line, end_col)
+            } else {
+                (end_line, end_col, start_line, start_col)
+            };
+
+        let mut result = String::new();
+        for line_idx in sl..=el {
+            if line_idx >= self.cached_line_texts.len() {
+                break;
+            }
+            let text = &self.cached_line_texts[line_idx];
+            if line_idx == sl && line_idx == el {
+                let sb = display_width_to_char_idx(sc, text);
+                let eb = display_width_to_char_idx(ec, text);
+                if eb > sb {
+                    result.push_str(&text[sb..eb]);
+                }
+            } else if line_idx == sl {
+                let sb = display_width_to_char_idx(sc, text);
+                result.push_str(&text[sb..]);
+                result.push('\n');
+            } else if line_idx == el {
+                let eb = display_width_to_char_idx(ec, text);
+                result.push_str(&text[..eb]);
+            } else {
+                result.push_str(text);
+                result.push('\n');
+            }
+        }
+        result
+    }
+
+    pub fn handle_hover(&mut self, row: u16, col: u16) -> bool {
+        let abs = self.screen_to_content(row);
+        let abs = match abs {
+            Some(v) => v,
+            None => {
+                if self.hovered_msg_index.is_some() {
+                    self.hovered_msg_index = None;
+                }
+                return false;
+            }
+        };
+        let col = col as usize;
+        for range in self.clickable_ranges.iter() {
+            if abs == range.line && col >= range.col_start && col < range.col_end {
+                if self.hovered_msg_index != Some(range.msg_index) {
+                    self.hovered_msg_index = Some(range.msg_index);
+                }
+                return true;
+            }
+        }
+        if self.hovered_msg_index.is_some() {
+            self.hovered_msg_index = None;
+        }
+        false
+    }
+
+    fn screen_to_content(&self, row: u16) -> Option<usize> {
+        let area = self.messages_area;
+        if row < area.y || row >= area.y + area.height {
+            return None;
+        }
+        let visible_row = (row - area.y) as usize;
+        let visible_height = area.height as usize;
+        let padding = if self.content_height < visible_height {
+            visible_height - self.content_height
+        } else {
+            0
+        };
+        if visible_row < padding {
+            return None;
+        }
+        Some(self.content_top + visible_row - padding)
+    }
+
+    fn toggle_by_index(&mut self, idx: usize) {
+        if let Some(msg) = self.messages.get_mut(idx) {
+            match msg {
+                DisplayMessage::Chat { collapsed, .. } | DisplayMessage::Tool { collapsed, .. } => {
+                    *collapsed = !*collapsed;
+                }
+                DisplayMessage::Diff { .. } => {}
+            }
+        }
+    }
+
+    pub fn toggle_last_collapsed(&mut self) {
+        for msg in self.messages.iter_mut().rev() {
+            match msg {
+                DisplayMessage::Chat { collapsed, .. } | DisplayMessage::Tool { collapsed, .. } => {
+                    if *collapsed {
+                        *collapsed = false;
+                        return;
+                    }
+                }
+                DisplayMessage::Diff { .. } => continue,
+            }
+        }
     }
 
     pub fn update_slash_matches(&mut self) {
@@ -463,7 +791,7 @@ impl AppState {
                 } else {
                     Some(std::mem::take(&mut self.thinking_buffer))
                 };
-                self.add_message("assistant", full_text, thinking);
+                self.add_chat("assistant", full_text, thinking);
                 self.text_buffer.clear();
             }
             AppEvent::TurnComplete => {
@@ -471,16 +799,22 @@ impl AppState {
                 self.mode = AppMode::Chat;
                 if let Some(msg) = self.queued_messages.pop_front() {
                     self.input_clear();
-                    self.add_message("user", &msg, None);
+                    self.add_chat("user", &msg, None);
                 }
             }
-            AppEvent::ToolResult { name, result } => {
-                if self.should_show_tool_result(name) {
-                    let preview: String = result.chars().take(100).collect();
-                    self.add_message("tool", &format!("[{}: {}]", name, preview), None);
-                }
+            AppEvent::ToolResult {
+                call_id,
+                name,
+                result,
+            } => {
+                let show = self.should_show_tool_result(name);
+                self.complete_tool(call_id, result.clone(), !show);
             }
-            AppEvent::ToolCalling { name, arguments } => {
+            AppEvent::ToolCalling {
+                call_id,
+                name,
+                arguments,
+            } => {
                 if !self.text_buffer.is_empty() {
                     let thinking = if self.thinking_buffer.is_empty() {
                         None
@@ -488,118 +822,60 @@ impl AppState {
                         Some(std::mem::take(&mut self.thinking_buffer))
                     };
                     let text = std::mem::take(&mut self.text_buffer);
-                    self.add_message("assistant", &text, thinking);
+                    self.add_chat("assistant", &text, thinking);
                 }
-                if self.should_show_tool_call(name) {
-                    let display = match name.as_str() {
-                        "run_command" => {
-                            let args: serde_json::Value =
-                                serde_json::from_str(arguments).unwrap_or_default();
-                            let cmd = args["command"].as_str().unwrap_or("?");
-                            format!("$ {}", cmd)
-                        }
-                        "read_file" => {
-                            let args: serde_json::Value =
-                                serde_json::from_str(arguments).unwrap_or_default();
-                            let path = args["path"].as_str().unwrap_or("?");
-                            format!("read {}", path)
-                        }
-                        "write_file" => {
-                            let args: serde_json::Value =
-                                serde_json::from_str(arguments).unwrap_or_default();
-                            let path = args["path"].as_str().unwrap_or("?");
-                            format!("write {}", path)
-                        }
-                        "edit_file" => {
-                            let args: serde_json::Value =
-                                serde_json::from_str(arguments).unwrap_or_default();
-                            let path = args["path"].as_str().unwrap_or("?");
-                            if let Some(count) = args["count"].as_u64() {
-                                format!("edit {} ({} changes)", path, count)
-                            } else {
-                                format!("edit {}", path)
-                            }
-                        }
-                        "list_dir" => {
-                            let args: serde_json::Value =
-                                serde_json::from_str(arguments).unwrap_or_default();
-                            let path = args["path"].as_str().unwrap_or(".");
-                            format!("ls {}", path)
-                        }
-                        _ => name.to_string(),
-                    };
-                    self.add_message("tool", &display, None);
-                }
+                let display = self.format_tool_args(name, arguments);
+                self.add_tool_call(call_id.clone(), name.clone(), display);
             }
             AppEvent::ApprovalPending {
+                call_id,
+                tool_name,
                 preview,
-                is_tty_command,
-                command,
             } => {
                 self.approval_selected = ApprovalChoice::Allow;
                 self.feedback_clear();
 
-                let tool_label = if let Some(cmd) = command {
-                    format!("→ $ {}", cmd)
-                } else {
-                    let first_line = preview.lines().next().unwrap_or("");
-                    if first_line.starts_with("---") || first_line.starts_with("diff ") {
-                        let second = preview.lines().nth(1).unwrap_or("");
-                        if let Some(path) = second.strip_prefix("+++ ") {
-                            format!(
-                                "→ edit {}",
-                                path.trim_start_matches('b').trim_start_matches('/')
-                            )
-                        } else {
-                            "→ edit".to_string()
-                        }
-                    } else if let Some(cmd) = first_line.strip_prefix("$ ") {
-                        format!("→ $ {}", cmd)
+                let first_line = preview.lines().next().unwrap_or("");
+
+                let tool_label = if first_line.starts_with("$ ") {
+                    format!("→ {}", first_line)
+                } else if first_line.starts_with("---") || first_line.starts_with("diff ") {
+                    let second = preview.lines().nth(1).unwrap_or("");
+                    if let Some(path) = second.strip_prefix("+++ ") {
+                        format!(
+                            "→ edit {}",
+                            path.trim_start_matches('b').trim_start_matches('/')
+                        )
                     } else {
-                        format!("→ {}", first_line)
+                        "→ edit".to_string()
                     }
+                } else {
+                    format!("→ {}", first_line)
                 };
 
                 let has_diff_content = preview.lines().count() > 1 || !preview.starts_with("$ ");
 
                 if has_diff_content {
                     if let Some(last) = self.messages.last_mut() {
-                        if last.role == "tool" {
-                            last.hidden = true;
+                        if let DisplayMessage::Tool { hidden, .. } = last {
+                            *hidden = true;
                         }
                     }
 
-                    self.messages.push(DisplayMessage {
-                        role: "diff".to_string(),
-                        content: preview.clone(),
-                        thinking: None,
-                        collapsed: false,
-                        hidden: false,
-                    });
+                    self.add_diff(preview.clone());
                 }
                 self.scroll_to_bottom();
                 self.mode = AppMode::Approval {
+                    tool_call_id: call_id.clone(),
+                    tool_name: tool_name.clone(),
                     tool_label,
-                    is_tty_command: *is_tty_command,
-                    command: command.clone(),
                 };
             }
-            AppEvent::CommandResult { output } => {
-                let trimmed = output.trim().to_string();
-                let collapsed = trimmed.lines().count() > 5;
-                self.messages.push(DisplayMessage {
-                    role: "system".to_string(),
-                    content: trimmed,
-                    thinking: None,
-                    collapsed,
-                    hidden: false,
-                });
-            }
-            AppEvent::CommandRejected { feedback } => {
-                self.add_message("system", feedback, None);
+            AppEvent::ToolRejected { call_id, feedback } => {
+                self.complete_tool(call_id, feedback.clone(), true);
             }
             AppEvent::Error { message } => {
-                self.add_message("system", &format!("Error: {}", message), None);
+                self.add_chat("system", &format!("Error: {}", message), None);
             }
         }
     }
@@ -638,7 +914,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
     if show_welcome {
         draw_welcome(f, &theme, chunks[0]);
     } else {
-        draw_messages(f, state, chunks[0], chunks[0].width as usize);
+        draw_messages(f, state, chunks[0], chunks[0].width.saturating_sub(1) as usize);
     }
 
     match &state.mode {
@@ -702,7 +978,7 @@ fn draw_welcome(f: &mut Frame, theme: &Theme, area: Rect) {
     let tagline = APP_TAGLINE;
     let tips = [
         "Type a message to start a conversation",
-        "/ for commands  \u{2502}  ? for help  \u{2502}  Esc to interrupt",
+        "/ for commands  \u{2502}  ? for help",
     ];
 
     let total_content = logo_height + 1 + 1 + 1 + tips.len() as u16;
@@ -825,7 +1101,8 @@ fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
 }
 
 fn draw_messages(f: &mut Frame, state: &mut AppState, area: Rect, terminal_width: usize) {
-    let text = build_all_lines(state, terminal_width);
+    let result = build_all_lines(state, terminal_width);
+    let text = result.text;
     let content_height = text.height();
     let visible_height = area.height as usize;
 
@@ -856,6 +1133,12 @@ fn draw_messages(f: &mut Frame, state: &mut AppState, area: Rect, terminal_width
     } else {
         visible_lines
     };
+
+    state.clickable_ranges = result.click_ranges;
+    state.cached_line_texts = result.line_texts;
+    state.content_top = top;
+    state.content_height = content_height;
+    state.messages_area = area;
 
     let paragraph = Paragraph::new(padded);
     f.render_widget(paragraph, area);
@@ -892,29 +1175,33 @@ fn draw_input(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
         theme.border
     };
 
-    let prompt_width = UnicodeWidthStr::width(PROMPT) as u16;
-
-    let input_spans = if state.is_streaming && !state.input.is_empty() {
-        vec![
-            Span::styled(
-                PROMPT,
-                Style::default()
-                    .fg(theme.prompt)
-                    .add_modifier(Modifier::BOLD),
+    let (prompt_str, prompt_color) = if state.is_streaming && !state.queued_messages.is_empty() {
+        (
+            format!(
+                "\u{276F} {} queued \u{2190} ",
+                state.queued_messages.len()
             ),
-            Span::styled(state.input.as_str(), Style::default().fg(theme.muted)),
-        ]
+            theme.muted,
+        )
     } else {
-        vec![
-            Span::styled(
-                PROMPT,
-                Style::default()
-                    .fg(theme.prompt)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(state.input.as_str(), Style::default().fg(theme.input)),
-        ]
+        (PROMPT.to_string(), theme.prompt)
     };
+    let prompt_width = UnicodeWidthStr::width(prompt_str.as_str()) as u16;
+
+    let input_fg = if state.is_streaming && !state.input.is_empty() {
+        theme.muted
+    } else {
+        theme.input
+    };
+    let input_spans = vec![
+        Span::styled(
+            prompt_str,
+            Style::default()
+                .fg(prompt_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(state.input.as_str(), Style::default().fg(input_fg)),
+    ];
 
     let content = Line::from(input_spans);
     let input = Paragraph::new(content).block(
@@ -944,9 +1231,12 @@ fn draw_approval_header(f: &mut Frame, area: Rect, tool_label: &str, theme: &The
                 .add_modifier(Modifier::BOLD),
         ),
     ]);
+    let max_w = area.width as usize;
+    let label_w = max_w.saturating_sub(3); // "   " prefix
+    let truncated: String = tool_label.chars().take(label_w).collect();
     let detail = Line::from(vec![
         Span::styled("   ", Style::default()),
-        Span::styled(tool_label.to_string(), Style::default().fg(theme.muted)),
+        Span::styled(truncated, Style::default().fg(theme.muted)),
     ]);
     let para = Paragraph::new(vec![header, detail]).style(Style::default().bg(theme.status_bg));
     f.render_widget(para, area);
@@ -954,6 +1244,7 @@ fn draw_approval_header(f: &mut Frame, area: Rect, tool_label: &str, theme: &The
 
 fn draw_approval_choices(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
     let selected = state.approval_selected;
+    let max_w = area.width as usize;
     let choices: Vec<Span> = ApprovalChoice::ALL
         .iter()
         .flat_map(|&choice| {
@@ -976,12 +1267,20 @@ fn draw_approval_choices(f: &mut Frame, state: &AppState, area: Rect, theme: &Th
     let editing = state.approval_selected == ApprovalChoice::EditFeedback
         && matches!(state.mode, AppMode::Approval { .. });
     let hint_text = if editing {
-        "enter confirm  \u{2502}  esc cancel"
+        "enter confirm  \u{2502}  esc back"
     } else {
-        "\u{2194} select  \u{2502}  enter confirm  \u{2502}  esc reject"
+        "\u{2194} select  \u{2502}  y/n confirm"
+    };
+    let hint_str = format!("  {}", hint_text);
+    let hint_w = UnicodeWidthStr::width(hint_str.as_str());
+    let hint_display = if hint_w > max_w {
+        let truncated: String = hint_str.chars().take(max_w).collect();
+        truncated
+    } else {
+        hint_str
     };
     let hints = Line::from(Span::styled(
-        format!("  {}", hint_text),
+        hint_display,
         Style::default().fg(theme.status_muted),
     ));
 
@@ -1039,6 +1338,7 @@ fn draw_slash_menu(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
     };
 
     let name_col_width = 20usize;
+    let inner_w = inner.width as usize;
     let items: Vec<Line> = state
         .slash_matched
         .iter()
@@ -1051,16 +1351,11 @@ fn draw_slash_menu(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
             } else {
                 format!("{} ({})", cmd.name, cmd.aliases.join(", "))
             };
+            let name_padded = format!("{:<width$}", name_str, width = name_col_width);
+            let max_desc = inner_w.saturating_sub(name_col_width + 4);
+            let desc_display: String = cmd.description.chars().take(max_desc).collect();
+
             if sel {
-                let desc = cmd.description;
-                let name_padded = format!("{:<width$}", name_str, width = name_col_width);
-                let desc_display = if inner.width as usize > name_col_width + 4 {
-                    let max_desc = inner.width as usize - name_col_width - 4;
-                    let d: String = desc.chars().take(max_desc).collect();
-                    d
-                } else {
-                    String::new()
-                };
                 Line::from(vec![
                     Span::styled(
                         format!(" \u{25B8} {}", name_padded),
@@ -1073,21 +1368,9 @@ fn draw_slash_menu(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
                         desc_display,
                         Style::default().fg(Color::Black).bg(theme.tool),
                     ),
-                    Span::styled(
-                        " ".repeat(inner.width as usize),
-                        Style::default().bg(theme.tool),
-                    ),
+                    Span::styled(" ".repeat(inner_w), Style::default().bg(theme.tool)),
                 ])
             } else {
-                let desc = cmd.description;
-                let name_padded = format!("{:<width$}", name_str, width = name_col_width);
-                let desc_display = if inner.width as usize > name_col_width + 4 {
-                    let max_desc = inner.width as usize - name_col_width - 4;
-                    let d: String = desc.chars().take(max_desc).collect();
-                    d
-                } else {
-                    String::new()
-                };
                 Line::from(vec![
                     Span::styled(
                         format!("   {}", name_padded),

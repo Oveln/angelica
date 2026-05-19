@@ -8,8 +8,7 @@
 //                               iteration = 0, tool_queue.clear()
 //                                   │
 //   ApprovePending ─────────────┐   │
-//   ApprovePendingWithResult ───┤   │
-//   RejectCommand ──────────────┘   │
+//   RejectTool ─────────────────┘   │
 //         │                         │
 //         ▼                         ▼
 //   resolve pending            step()
@@ -52,9 +51,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::agent::events::{AppEvent, UserAction};
-use crate::agent::group::{
-    BatchedEdit, PendingApproval, ToolCallGroup, group_tool_calls, needs_tty,
-};
+use crate::agent::group::{BatchedEdit, PendingApproval, ToolCallGroup, group_tool_calls};
 use crate::agent::history::History;
 use crate::config::Config;
 use crate::llm::types::ChatMessage;
@@ -208,17 +205,18 @@ impl Agent {
                 let args: serde_json::Value =
                     serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::Value::Null);
 
-                let _ = event_tx
-                    .send(AppEvent::ToolCalling {
-                        name: name.clone(),
-                        arguments: tc.function.arguments.clone(),
-                    })
-                    .await;
-
                 if self.tools.is_auto_execute(&name) {
+                    let _ = event_tx
+                        .send(AppEvent::ToolCalling {
+                            call_id: tc.id.clone(),
+                            name: name.clone(),
+                            arguments: tc.function.arguments.clone(),
+                        })
+                        .await;
                     let result = self.execute_tool(&name, args).await;
                     let _ = event_tx
                         .send(AppEvent::ToolResult {
+                            call_id: tc.id.clone(),
                             name: name.clone(),
                             result: result.clone(),
                         })
@@ -226,42 +224,38 @@ impl Agent {
                     self.history.record_tool_result(tc.id, result);
                     ProcessOutcome::Continue
                 } else {
-                    let (preview, is_tty, command) = self.make_approval_preview(&name, &args, None);
+                    let preview = self.make_approval_preview(&name, &args, None);
+
+                    let tc_id = tc.id.clone();
+                    let _ = event_tx
+                        .send(AppEvent::ApprovalPending {
+                            call_id: tc_id.clone(),
+                            tool_name: name.clone(),
+                            preview,
+                        })
+                        .await;
 
                     self.history
-                        .record_tool_result(tc.id.clone(), "Pending user approval...".to_string());
+                        .record_tool_result(tc_id, "Pending user approval...".to_string());
                     self.pending_approval = Some(PendingApproval {
                         tc_ids: vec![tc.id],
                         tool_name: name,
                         args,
+                        display_args: tc.function.arguments.clone(),
                         batched_edits: None,
                     });
-
-                    let _ = event_tx
-                        .send(AppEvent::ApprovalPending {
-                            preview,
-                            is_tty_command: is_tty,
-                            command,
-                        })
-                        .await;
 
                     ProcessOutcome::NeedApproval
                 }
             }
             ToolCallGroup::BatchedEdits { path, edits } => {
                 let count = edits.len();
+                let first_id = edits.first().map(|e| e.tc_id.clone()).unwrap_or_default();
                 let display_args = serde_json::to_string(&serde_json::json!({
                     "path": path,
                     "count": count,
                 }))
                 .unwrap_or_default();
-
-                let _ = event_tx
-                    .send(AppEvent::ToolCalling {
-                        name: "edit_file".to_string(),
-                        arguments: display_args,
-                    })
-                    .await;
 
                 let searches_replaces: Vec<(String, String)> = edits
                     .iter()
@@ -294,14 +288,15 @@ impl Agent {
                     tc_ids: batched.iter().map(|b| b.tc_id.clone()).collect(),
                     tool_name: "edit_file".to_string(),
                     args: serde_json::json!({"path": path}),
+                    display_args,
                     batched_edits: Some(batched),
                 });
 
                 let _ = event_tx
                     .send(AppEvent::ApprovalPending {
+                        call_id: first_id,
+                        tool_name: "edit_file".to_string(),
                         preview,
-                        is_tty_command: false,
-                        command: None,
                     })
                     .await;
 
@@ -362,6 +357,7 @@ impl Agent {
                 .stream_complete(&all_messages, &specs, &stream_tx)
                 .await;
 
+            drop(stream_tx);
             let _ = drain_handle.await;
 
             let result = match llm_result {
@@ -409,45 +405,49 @@ impl Agent {
         name: &str,
         args: &serde_json::Value,
         batched_edits: Option<&[(String, String)]>,
-    ) -> (String, bool, Option<String>) {
+    ) -> String {
         if let Some(edits) = batched_edits {
             let path = args["path"].as_str().unwrap_or("?");
             match crate::tools::edit_file::preview_batched(path, edits) {
-                Ok(preview) => return (preview, false, None),
+                Ok(preview) => return preview,
                 Err(e) => {
-                    return (
-                        format!("Preview failed: {}\n\nArguments: {}", e, args),
-                        false,
-                        None,
-                    );
+                    return format!("Preview failed: {}\n\nArguments: {}", e, args);
                 }
             }
         }
         if let Some(tool) = self.tools.get(name) {
             match tool.preview(args.clone()) {
-                Ok(Some(preview)) => return (preview, false, None),
+                Ok(Some(preview)) => return preview,
                 Ok(None) => {}
                 Err(e) => {
-                    return (
-                        format!("Preview failed: {}\n\nArguments: {}", e, args),
-                        false,
-                        None,
-                    );
+                    return format!("Preview failed: {}\n\nArguments: {}", e, args);
                 }
             }
         }
 
         if name == "run_command" {
-            let cmd = args["command"].as_str().unwrap_or("").to_string();
-            let is_tty = needs_tty(&cmd);
-            return (format!("$ {}", cmd), is_tty, Some(cmd.clone()));
+            let cmd = args["command"].as_str().unwrap_or("");
+            return format!("$ {}", cmd);
         }
 
-        (format!("[{}]\nArguments: {}", name, args), false, None)
+        format!("[{}]\nArguments: {}", name, args)
     }
 
-    pub async fn approve_pending(&mut self, event_tx: &mpsc::Sender<AppEvent>) {
-        let pending = self.pending_approval.take().expect("no pending approval");
+    pub async fn approve_pending(&mut self, event_tx: &mpsc::Sender<AppEvent>) -> bool {
+        let pending = match self.pending_approval.take() {
+            Some(p) => p,
+            None => return false,
+        };
+
+        for tc_id in &pending.tc_ids {
+            let _ = event_tx
+                .send(AppEvent::ToolCalling {
+                    call_id: tc_id.clone(),
+                    name: pending.tool_name.clone(),
+                    arguments: pending.display_args.clone(),
+                })
+                .await;
+        }
 
         let result = if let Some(ref batched) = pending.batched_edits {
             let edits: Vec<(String, String)> = batched
@@ -463,64 +463,45 @@ impl Agent {
             self.execute_tool(&pending.tool_name, pending.args).await
         };
 
-        let _ = event_tx
-            .send(AppEvent::CommandResult {
-                output: result.clone(),
-            })
-            .await;
-
         for tc_id in &pending.tc_ids {
             self.history.update_tool_result(tc_id, result.clone());
+            let _ = event_tx
+                .send(AppEvent::ToolResult {
+                    call_id: tc_id.clone(),
+                    name: pending.tool_name.clone(),
+                    result: result.clone(),
+                })
+                .await;
         }
+        true
     }
 
-    pub async fn approve_pending_with_result(
-        &mut self,
-        output: String,
-        event_tx: &mpsc::Sender<AppEvent>,
-    ) {
-        let pending = self.pending_approval.take().expect("no pending approval");
-
-        let _ = event_tx
-            .send(AppEvent::CommandResult {
-                output: output.clone(),
-            })
-            .await;
-
-        for tc_id in &pending.tc_ids {
-            self.history.update_tool_result(tc_id, output.clone());
-        }
-    }
-
-    pub async fn reject_command(&mut self, feedback: &str, event_tx: &mpsc::Sender<AppEvent>) {
-        let pending = self.pending_approval.take().expect("no pending approval");
+    pub async fn reject_pending(&mut self, feedback: &str, event_tx: &mpsc::Sender<AppEvent>) -> bool {
+        let pending = match self.pending_approval.take() {
+            Some(p) => p,
+            None => return false,
+        };
         let msg = if feedback.is_empty() {
             "User rejected this operation.".to_string()
         } else {
             format!("User rejected this operation. Feedback: {}", feedback)
         };
-        let _ = event_tx
-            .send(AppEvent::CommandRejected {
-                feedback: msg.clone(),
-            })
-            .await;
-
         for tc_id in &pending.tc_ids {
             self.history.update_tool_result(tc_id, msg.clone());
+            let _ = event_tx
+                .send(AppEvent::ToolRejected {
+                    call_id: tc_id.clone(),
+                    feedback: msg.clone(),
+                })
+                .await;
         }
+        true
     }
 
     pub async fn approve_and_step(&mut self, event_tx: &mpsc::Sender<AppEvent>) -> bool {
-        self.approve_pending(event_tx).await;
-        self.step(event_tx).await
-    }
-
-    pub async fn approve_and_step_with_result(
-        &mut self,
-        output: String,
-        event_tx: &mpsc::Sender<AppEvent>,
-    ) -> bool {
-        self.approve_pending_with_result(output, event_tx).await;
+        if !self.approve_pending(event_tx).await {
+            return false;
+        }
         self.step(event_tx).await
     }
 
@@ -529,7 +510,9 @@ impl Agent {
         feedback: &str,
         event_tx: &mpsc::Sender<AppEvent>,
     ) -> bool {
-        self.reject_command(feedback, event_tx).await;
+        if !self.reject_pending(feedback, event_tx).await {
+            return false;
+        }
         self.step(event_tx).await
     }
 
@@ -548,6 +531,12 @@ impl Agent {
     pub fn clear_history(&mut self) {
         self.history.clear();
         self.dirty = false;
+    }
+
+    pub fn rollback_last_user_message(&mut self) {
+        if self.history.messages().last().map(|m| m.role.as_str()) == Some("user") {
+            self.history.pop_last();
+        }
     }
 
     pub async fn save_if_dirty(&mut self) {
@@ -576,23 +565,11 @@ async fn run_loop(
                 let _ = agent.approve_and_step(event_tx).await;
                 agent.save_if_dirty().await;
             }
-            UserAction::ApprovePendingWithResult { output } => {
-                let _ = agent.approve_and_step_with_result(output, event_tx).await;
-                agent.save_if_dirty().await;
-            }
-            UserAction::RejectCommand { feedback } => {
+            UserAction::RejectTool { feedback } => {
                 let _ = agent
                     .reject_and_step(feedback.as_deref().unwrap_or(""), event_tx)
                     .await;
                 agent.save_if_dirty().await;
-            }
-            UserAction::Interrupt => {
-                agent.save_if_dirty().await;
-                agent.pending_approval = None;
-                agent.tool_queue.clear();
-                agent.iteration = 0;
-                agent.history.clear();
-                agent.dirty = false;
             }
             UserAction::ClearHistory => {
                 agent.clear_history();

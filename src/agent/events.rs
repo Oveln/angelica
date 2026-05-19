@@ -12,23 +12,23 @@ pub enum AppEvent {
     TurnComplete,
 
     ToolCalling {
+        call_id: String,
         name: String,
         arguments: String,
     },
     ToolResult {
+        call_id: String,
         name: String,
         result: String,
     },
 
     ApprovalPending {
+        call_id: String,
+        tool_name: String,
         preview: String,
-        is_tty_command: bool,
-        command: Option<String>,
     },
-    CommandResult {
-        output: String,
-    },
-    CommandRejected {
+    ToolRejected {
+        call_id: String,
         feedback: String,
     },
 
@@ -41,9 +41,7 @@ pub enum AppEvent {
 pub enum UserAction {
     SendMessage { content: String },
     ApprovePending,
-    ApprovePendingWithResult { output: String },
-    RejectCommand { feedback: Option<String> },
-    Interrupt,
+    RejectTool { feedback: Option<String> },
     ClearHistory,
     Quit,
 }

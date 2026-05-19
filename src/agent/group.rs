@@ -10,19 +10,8 @@ pub(super) struct PendingApproval {
     pub tc_ids: Vec<String>,
     pub tool_name: String,
     pub args: serde_json::Value,
+    pub display_args: String,
     pub batched_edits: Option<Vec<BatchedEdit>>,
-}
-
-pub(super) fn needs_tty(command: &str) -> bool {
-    let trimmed = command.trim_start();
-    trimmed.starts_with("sudo ")
-        || trimmed.starts_with("sudo\t")
-        || trimmed == "sudo"
-        || trimmed.starts_with("su ")
-        || trimmed.starts_with("su\t")
-        || trimmed == "su"
-        || trimmed.starts_with("ssh ")
-        || trimmed.starts_with("passwd")
 }
 
 // ── Tool call grouping ──

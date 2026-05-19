@@ -1,36 +1,114 @@
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
+use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
 use super::theme::{
     ASSISTANT_GLYPH, CARD_BOT, CARD_MID, CARD_TOP, RAIL, THINKING_RAIL, TOOL_GLYPH, USER_GLYPH,
 };
-use super::ui::AppState;
+use super::ui::{AppState, ClickRange, DisplayMessage};
 
-pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> Text<'static> {
+const TOGGLE_LABEL: &str = "[toggle]";
+
+pub(super) struct BuildResult {
+    pub text: Text<'static>,
+    pub click_ranges: Vec<ClickRange>,
+    pub line_texts: Vec<String>,
+}
+
+pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildResult {
     let theme = state.theme();
     let mut lines: Vec<Line> = Vec::new();
+    let mut click_ranges: Vec<ClickRange> = Vec::new();
 
-    for msg in state.filtered_messages() {
-        match msg.role.as_str() {
-            "user" => {
-                render_user_message(&mut lines, &msg.content, theme);
+    for (msg_idx, msg) in state.messages.iter().enumerate() {
+        if msg.is_hidden() {
+            continue;
+        }
+        if !lines.is_empty() {
+            lines.push(Line::from(""));
+        }
+        let line_count_before = lines.len();
+
+        match msg {
+            DisplayMessage::Chat {
+                role,
+                content,
+                thinking,
+                collapsed,
+                ..
+            } => match role.as_str() {
+                "user" => render_glyph_lines(
+                    &mut lines, content, USER_GLYPH, theme.user, theme.user, theme.rail,
+                    terminal_width,
+                ),
+                "assistant" => {
+                    render_assistant_message(&mut lines, state, content, thinking.as_deref(), terminal_width);
+                }
+                "system" => {
+                    render_system_message(&mut lines, content, *collapsed, theme, terminal_width);
+                }
+                _ => {
+                    lines.push(Line::from(content.clone()));
+                }
+            },
+            DisplayMessage::Tool {
+                args_display,
+                result,
+                collapsed,
+                ..
+            } => {
+                render_inline_tool(
+                    &mut lines,
+                    args_display,
+                    result.as_deref(),
+                    *collapsed,
+                    theme,
+                    terminal_width,
+                );
             }
-            "assistant" => {
-                render_assistant_message(&mut lines, state, &msg.content, msg.thinking.as_deref());
-            }
-            "tool" => {
-                render_tool_message(&mut lines, &msg.content, theme);
-            }
-            "system" => {
-                render_system_message(&mut lines, &msg.content, msg.collapsed, theme);
-            }
-            "diff" => {
-                let diff_lines =
-                    super::diff::render_diff_lines(&msg.content, terminal_width, theme);
+            DisplayMessage::Diff { content, .. } => {
+                let diff_lines = super::diff::render_diff_lines(content, terminal_width, theme);
                 lines.extend(diff_lines);
             }
-            _ => {
-                lines.push(Line::from(msg.content.clone()));
+        }
+
+        let can_toggle = match msg {
+            DisplayMessage::Chat { collapsed, .. } => *collapsed,
+            DisplayMessage::Tool { result, .. } => result.is_some(),
+            _ => false,
+        };
+
+        if can_toggle && lines.len() > line_count_before {
+            let toggle_line = lines.len() - 1;
+            let is_hovered = state.hovered_msg_index == Some(msg_idx);
+            let style = toggle_style(theme, is_hovered);
+            let toggle_text = format!(" {TOGGLE_LABEL}");
+            let toggle_w = UnicodeWidthStr::width(toggle_text.as_str());
+
+            if let Some(line) = lines.get_mut(toggle_line) {
+                let spans_before_pad = if line.spans.len() > 1 {
+                    line.spans.len() - 1
+                } else {
+                    0
+                };
+                let content_w: usize = line.spans[..spans_before_pad]
+                    .iter()
+                    .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                    .sum();
+                let pad_needed = terminal_width.saturating_sub(content_w + toggle_w);
+
+                if let Some(last) = line.spans.last_mut() {
+                    last.content = " ".repeat(pad_needed).into();
+                }
+                let toggle_col = content_w + pad_needed;
+                line.spans.push(Span::styled(toggle_text, style));
+                click_ranges.push(ClickRange {
+                    line: toggle_line,
+                    col_start: toggle_col,
+                    col_end: toggle_col + toggle_w,
+                    msg_index: msg_idx,
+                });
             }
         }
     }
@@ -48,11 +126,15 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> Text<'
                     .add_modifier(Modifier::ITALIC),
             ),
         ]));
+        let think_w = terminal_width.saturating_sub(UnicodeWidthStr::width(THINKING_RAIL));
+        let think_style = Style::default().fg(theme.thinking);
         for think_line in state.thinking_buffer.lines() {
-            lines.push(Line::from(Span::styled(
-                format!("{}{}", THINKING_RAIL, think_line),
-                Style::default().fg(theme.thinking),
-            )));
+            for chunk in wrap_str(think_line, think_w) {
+                lines.push(Line::from(Span::styled(
+                    format!("{}{}", THINKING_RAIL, chunk),
+                    think_style,
+                )));
+            }
         }
     }
 
@@ -67,37 +149,110 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> Text<'
             ]));
         }
         let rail_style = Style::default().fg(theme.rail);
+        let body_style = Style::default().fg(theme.input);
+        let content_w = terminal_width.saturating_sub(UnicodeWidthStr::width(RAIL));
         for content_line in state.text_buffer.lines() {
-            lines.push(Line::from(vec![
-                Span::styled(RAIL.to_string(), rail_style),
-                Span::styled(content_line.to_string(), Style::default().fg(theme.input)),
-            ]));
+            for chunk in wrap_str(content_line, content_w) {
+                lines.push(Line::from(vec![
+                    Span::styled(RAIL.to_string(), rail_style),
+                    Span::styled(chunk, body_style),
+                ]));
+            }
         }
     }
 
+    if let Some((sl, sc, el, ec)) = state.selection {
+        let (sel_start_line, sel_start_col, sel_end_line, sel_end_col) =
+            if sl < el || (sl == el && sc <= ec) {
+                (sl, sc, el, ec)
+            } else {
+                (el, ec, sl, sc)
+            };
+
+        for line_idx in sel_start_line..=sel_end_line {
+            let sel_col_start = if line_idx == sel_start_line {
+                sel_start_col
+            } else {
+                0
+            };
+            let sel_col_end = if line_idx == sel_end_line {
+                sel_end_col
+            } else {
+                usize::MAX
+            };
+
+            if let Some(line) = lines.get_mut(line_idx) {
+                apply_line_selection(line, sel_col_start, sel_col_end, theme.selection_bg);
+            }
+        }
+    }
+
+    let line_texts: Vec<String> = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
+        .collect();
+
     lines.push(Line::from(""));
-    Text::from(lines)
+    BuildResult {
+        text: Text::from(lines),
+        click_ranges,
+        line_texts,
+    }
 }
 
-fn render_user_message(lines: &mut Vec<Line>, content: &str, theme: &super::theme::Theme) {
-    let glyph_style = Style::default().fg(theme.user).add_modifier(Modifier::BOLD);
-    let rail_style = Style::default().fg(theme.rail);
-    let body_style = Style::default().fg(theme.user);
+fn toggle_style(theme: &super::theme::Theme, hovered: bool) -> Style {
+    let base = Style::default()
+        .fg(theme.accent)
+        .bg(theme.panel_bg)
+        .add_modifier(Modifier::ITALIC);
+    if hovered {
+        base.add_modifier(Modifier::UNDERLINED)
+    } else {
+        base
+    }
+}
+
+fn render_glyph_lines(
+    lines: &mut Vec<Line>,
+    content: &str,
+    glyph: &str,
+    glyph_fg: Color,
+    body_fg: Color,
+    rail_fg: Color,
+    max_w: usize,
+) {
+    let glyph_style = Style::default().fg(glyph_fg).add_modifier(Modifier::BOLD);
+    let rail_style = Style::default().fg(rail_fg);
+    let body_style = Style::default().fg(body_fg);
+    let glyph_prefix_w = UnicodeWidthStr::width(glyph) + 1; // glyph + " "
+    let rail_prefix_w = UnicodeWidthStr::width(RAIL);
 
     for (i, line) in content.lines().enumerate() {
-        if i == 0 {
-            lines.push(Line::from(vec![
-                Span::styled(USER_GLYPH.to_string(), glyph_style),
-                Span::styled(format!(" {}", line), body_style),
-            ]));
+        let (prefix_w, prefix_span) = if i == 0 {
+            (glyph_prefix_w, Some(Span::styled(glyph.to_string(), glyph_style)))
         } else {
-            lines.push(Line::from(vec![
-                Span::styled(RAIL.to_string(), rail_style),
-                Span::styled(line.to_string(), body_style),
-            ]));
+            (rail_prefix_w, Some(Span::styled(RAIL.to_string(), rail_style)))
+        };
+        let content_w = max_w.saturating_sub(prefix_w);
+        let wrapped = wrap_str(line, content_w);
+        for (wi, chunk) in wrapped.iter().enumerate() {
+            let mut spans = Vec::new();
+            if wi == 0 {
+                if let Some(p) = prefix_span.clone() {
+                    spans.push(p);
+                }
+            } else {
+                spans.push(Span::styled(RAIL.to_string(), rail_style));
+            }
+            spans.push(Span::styled(chunk.clone(), body_style));
+            lines.push(Line::from(spans));
         }
     }
-    lines.push(Line::from(""));
 }
 
 fn render_assistant_message(
@@ -105,16 +260,15 @@ fn render_assistant_message(
     state: &AppState,
     content: &str,
     thinking: Option<&str>,
+    max_w: usize,
 ) {
     let theme = state.theme();
-    let glyph_style = Style::default()
-        .fg(theme.assistant)
-        .add_modifier(Modifier::BOLD);
-    let rail_style = Style::default().fg(theme.rail);
-    let body_style = Style::default().fg(theme.input);
 
     if let Some(think) = thinking {
         if state.thinking_visible && !think.is_empty() {
+            let glyph_style = Style::default()
+                .fg(theme.assistant)
+                .add_modifier(Modifier::BOLD);
             lines.push(Line::from(vec![
                 Span::styled(ASSISTANT_GLYPH.to_string(), glyph_style),
                 Span::styled(
@@ -124,51 +278,124 @@ fn render_assistant_message(
                         .add_modifier(Modifier::ITALIC),
                 ),
             ]));
+            let think_w = max_w.saturating_sub(UnicodeWidthStr::width(THINKING_RAIL));
+            let think_style = Style::default().fg(theme.thinking);
             for think_line in think.lines() {
-                lines.push(Line::from(Span::styled(
-                    format!("{}{}", THINKING_RAIL, think_line),
-                    Style::default().fg(theme.thinking),
-                )));
+                for chunk in wrap_str(think_line, think_w) {
+                    lines.push(Line::from(Span::styled(
+                        format!("{}{}", THINKING_RAIL, chunk),
+                        think_style,
+                    )));
+                }
             }
         }
     }
 
-    for (i, line) in content.lines().enumerate() {
-        if i == 0 {
-            lines.push(Line::from(vec![
-                Span::styled(ASSISTANT_GLYPH.to_string(), glyph_style),
-                Span::styled(format!(" {}", line), body_style),
-            ]));
-        } else {
-            lines.push(Line::from(vec![
-                Span::styled(RAIL.to_string(), rail_style),
-                Span::styled(line.to_string(), body_style),
-            ]));
-        }
-    }
-    lines.push(Line::from(""));
+    render_glyph_lines(
+        lines,
+        content,
+        ASSISTANT_GLYPH,
+        theme.assistant,
+        theme.input,
+        theme.rail,
+        max_w,
+    );
 }
 
-fn render_tool_message(lines: &mut Vec<Line>, content: &str, theme: &super::theme::Theme) {
-    let tool_lines: Vec<&str> = content.lines().collect();
-    let rail_style = Style::default().fg(theme.tool);
-    let body_style = Style::default().fg(theme.tool);
+fn render_inline_tool(
+    lines: &mut Vec<Line>,
+    args_display: &str,
+    result: Option<&str>,
+    collapsed: bool,
+    theme: &super::theme::Theme,
+    width: usize,
+) {
+    let panel_bg = theme.panel_bg;
+    let tool_style = Style::default().fg(theme.tool).bg(panel_bg);
+    let rail_style = Style::default().fg(theme.rail).bg(panel_bg);
+    let body_style = Style::default().fg(theme.input).bg(panel_bg);
 
-    for (i, line) in tool_lines.iter().enumerate() {
-        let prefix = if tool_lines.len() == 1 {
-            TOOL_GLYPH
-        } else if i == 0 {
-            CARD_TOP
-        } else if i == tool_lines.len() - 1 {
-            CARD_BOT
+    lines.push(card_line(CARD_TOP, args_display, tool_style, width));
+
+    if let Some(result) = result {
+        if collapsed {
+            let first_line = result.lines().next().unwrap_or("");
+            let truncated: String = first_line.chars().take(80).collect();
+            let extra = result.lines().count().saturating_sub(1);
+            lines.push(trailing_pad_line(
+                CARD_BOT,
+                vec![
+                    Span::styled(truncated, Style::default().fg(theme.muted).bg(panel_bg)),
+                    Span::styled(
+                        format!(" +{} lines", extra),
+                        Style::default()
+                            .fg(theme.muted)
+                            .bg(panel_bg)
+                            .add_modifier(Modifier::ITALIC),
+                    ),
+                ],
+                rail_style,
+                width,
+            ));
         } else {
-            CARD_MID
-        };
-        lines.push(Line::from(vec![
-            Span::styled(prefix.to_string(), rail_style),
-            Span::styled(line.to_string(), body_style),
-        ]));
+            let all_lines: Vec<&str> = result.lines().collect();
+            for (i, line) in all_lines.iter().enumerate() {
+                let prefix = if i == all_lines.len() - 1 {
+                    CARD_BOT
+                } else {
+                    CARD_MID
+                };
+                lines.push(trailing_pad_line(
+                    prefix,
+                    vec![Span::styled(line.to_string(), body_style)],
+                    rail_style,
+                    width,
+                ));
+            }
+        }
+    } else {
+        lines.push(trailing_pad_line(
+            CARD_BOT,
+            vec![Span::styled(
+                "running\u{2026}".to_string(),
+                Style::default()
+                    .fg(theme.muted)
+                    .bg(panel_bg)
+                    .add_modifier(Modifier::ITALIC),
+            )],
+            rail_style,
+            width,
+        ));
     }
+}
+
+fn card_line(prefix: &str, content: &str, style: Style, width: usize) -> Line<'static> {
+    let prefix_w = UnicodeWidthStr::width(prefix);
+    let content_w = UnicodeWidthStr::width(content);
+    let pad_w = width.saturating_sub(prefix_w + content_w);
+    Line::from(vec![
+        Span::styled(prefix.to_string(), style),
+        Span::styled(content.to_string(), style),
+        Span::styled(" ".repeat(pad_w), style),
+    ])
+}
+
+fn trailing_pad_line(
+    prefix: &str,
+    content_spans: Vec<Span<'static>>,
+    rail_style: Style,
+    width: usize,
+) -> Line<'static> {
+    let prefix_w = UnicodeWidthStr::width(prefix);
+    let content_w: usize = content_spans
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum();
+    let pad_w = width.saturating_sub(prefix_w + content_w);
+    let mut spans = vec![Span::styled(prefix.to_string(), rail_style)];
+    spans.extend(content_spans);
+    spans.push(Span::styled(" ".repeat(pad_w), rail_style));
+    Line::from(spans)
 }
 
 fn render_system_message(
@@ -176,34 +403,40 @@ fn render_system_message(
     content: &str,
     collapsed: bool,
     theme: &super::theme::Theme,
+    max_w: usize,
 ) {
-    let rail_style = Style::default().fg(theme.system);
-    let body_style = Style::default().fg(theme.system);
+    let style = Style::default().fg(theme.system);
+    let prefix_w = UnicodeWidthStr::width(TOOL_GLYPH);
+    let content_w = max_w.saturating_sub(prefix_w);
+
+    let all_lines: Vec<&str> = content.lines().collect();
 
     if collapsed {
-        let all_lines: Vec<&str> = content.lines().collect();
         let (prefix, line) = if all_lines.len() == 1 {
             (TOOL_GLYPH, all_lines[0])
         } else {
             (CARD_TOP, all_lines[0])
         };
-        lines.push(Line::from(vec![
-            Span::styled(prefix.to_string(), rail_style),
-            Span::styled(line.to_string(), body_style),
-        ]));
-        if all_lines.len() > 1 {
+        for chunk in wrap_str(line, content_w) {
             lines.push(Line::from(vec![
-                Span::styled(CARD_BOT.to_string(), rail_style),
+                Span::styled(prefix.to_string(), style),
+                Span::styled(chunk, style),
+            ]));
+        }
+        if all_lines.len() > 1 {
+            let expand_bg = theme.status_bg;
+            lines.push(Line::from(vec![
+                Span::styled(CARD_BOT.to_string(), style),
                 Span::styled(
-                    format!("+{} lines [Ctrl+O]", all_lines.len().saturating_sub(1)),
+                    format!("+{} lines ", all_lines.len().saturating_sub(1)),
                     Style::default()
                         .fg(theme.system)
+                        .bg(expand_bg)
                         .add_modifier(Modifier::ITALIC),
                 ),
             ]));
         }
     } else {
-        let all_lines: Vec<&str> = content.lines().collect();
         for (i, line) in all_lines.iter().enumerate() {
             let prefix = if all_lines.len() == 1 {
                 TOOL_GLYPH
@@ -214,10 +447,88 @@ fn render_system_message(
             } else {
                 CARD_MID
             };
-            lines.push(Line::from(vec![
-                Span::styled(prefix.to_string(), rail_style),
-                Span::styled(line.to_string(), body_style),
-            ]));
+            for chunk in wrap_str(line, content_w) {
+                lines.push(Line::from(vec![
+                    Span::styled(prefix.to_string(), style),
+                    Span::styled(chunk, style),
+                ]));
+            }
         }
     }
+}
+
+fn wrap_str(s: &str, max_w: usize) -> Vec<String> {
+    if max_w == 0 {
+        return vec![s.to_string()];
+    }
+    let mut result = Vec::new();
+    let mut w = 0;
+    let mut last = 0;
+    for (i, c) in s.char_indices() {
+        let cw = c.width().unwrap_or(0);
+        if w + cw > max_w {
+            result.push(s[last..i].to_string());
+            last = i;
+            w = cw;
+        } else {
+            w += cw;
+        }
+    }
+    if last < s.len() {
+        result.push(s[last..].to_string());
+    }
+    if result.is_empty() {
+        result.push(String::new());
+    }
+    result
+}
+
+fn split_at_display_width(s: &str, width: usize) -> (&str, &str) {
+    let mut w = 0;
+    for (i, c) in s.char_indices() {
+        if w >= width {
+            return (&s[..i], &s[i..]);
+        }
+        w += c.width().unwrap_or(0);
+    }
+    (s, "")
+}
+
+fn apply_line_selection(line: &mut Line, sel_start: usize, sel_end: usize, bg: Color) {
+    let mut new_spans = Vec::new();
+    let mut col = 0;
+
+    for span in line.spans.drain(..) {
+        let span_width = UnicodeWidthStr::width(span.content.as_ref());
+        let span_end = col + span_width;
+
+        if span_end <= sel_start || col >= sel_end {
+            new_spans.push(span);
+            col = span_end;
+            continue;
+        }
+
+        let text: &str = span.content.as_ref();
+        let style = span.style;
+
+        let before_w = sel_start.saturating_sub(col);
+        let selected_w = sel_end.min(span_end).saturating_sub(sel_start.max(col));
+
+        let (before, rest) = split_at_display_width(text, before_w);
+        let (selected, after) = split_at_display_width(rest, selected_w);
+
+        if !before.is_empty() {
+            new_spans.push(Span::styled(before.to_string(), style));
+        }
+        if !selected.is_empty() {
+            new_spans.push(Span::styled(selected.to_string(), style.bg(bg)));
+        }
+        if !after.is_empty() {
+            new_spans.push(Span::styled(after.to_string(), style));
+        }
+
+        col = span_end;
+    }
+
+    line.spans = new_spans;
 }

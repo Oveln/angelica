@@ -76,8 +76,13 @@ impl LlmClient {
         let mut stream = response.bytes_stream();
         let mut line_buf = String::new();
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
+        loop {
+            let chunk = match stream.next().await {
+                Some(Ok(data)) => data,
+                Some(Err(e)) => return Err(anyhow::anyhow!("Stream error: {}", e)),
+                None => break,
+            };
+
             line_buf.push_str(&String::from_utf8_lossy(&chunk));
 
             while let Some(pos) = line_buf.find('\n') {

@@ -1,5 +1,6 @@
 use crossterm::{
-    event::{EventStream, KeyCode, KeyModifiers},
+    cursor::SetCursorStyle,
+    event::{DisableMouseCapture, EnableMouseCapture, EventStream, KeyCode, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -9,7 +10,7 @@ use std::io::{self, Write};
 use tokio::sync::mpsc;
 
 use crate::agent::events::{AppEvent, UserAction};
-use crate::tui::ui::{AppMode, AppState, ApprovalChoice, BUILTIN_COMMANDS};
+use crate::tui::ui::{AppMode, AppState, ApprovalChoice, BUILTIN_COMMANDS, DisplayMessage};
 
 pub async fn run_tui(
     mut app_event_rx: mpsc::Receiver<AppEvent>,
@@ -19,6 +20,7 @@ pub async fn run_tui(
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnableMouseCapture)?;
     stdout.write_all(b"\x1b[?1007h")?;
     stdout.flush()?;
     let backend = CrosstermBackend::new(io::stdout());
@@ -26,9 +28,16 @@ pub async fn run_tui(
 
     let mut state = AppState::new(model_name);
     let mut reader = EventStream::new();
+    let mut was_hovering_toggle = false;
+    let drag_scroll_sleep = tokio::time::sleep(std::time::Duration::MAX);
+    tokio::pin!(drag_scroll_sleep);
 
     loop {
         terminal.draw(|f| crate::tui::ui::draw(f, &mut state))?;
+
+        if state.drag_scroll_pos.is_some() {
+            drag_scroll_sleep.as_mut().reset(tokio::time::Instant::now() + std::time::Duration::from_millis(80));
+        }
 
         tokio::select! {
             event = app_event_rx.recv() => {
@@ -40,7 +49,7 @@ pub async fn run_tui(
                         }
                         if matches!(event, AppEvent::TurnComplete) {
                             if let Some(msg) = state.queued_messages.pop_front() {
-                                state.add_message("user", &msg, None);
+                                state.add_chat("user", &msg, None);
                                 let _ = user_action_tx.send(UserAction::SendMessage { content: msg }).await;
                             }
                         }
@@ -49,11 +58,53 @@ pub async fn run_tui(
                 }
             }
             maybe_event = reader.next() => {
-                if let Some(Ok(crossterm::event::Event::Key(key))) = maybe_event {
-                    if key.kind == crossterm::event::KeyEventKind::Press {
-                        handle_key(&mut state, key, &user_action_tx, &mut terminal).await;
+                match maybe_event {
+                    Some(Ok(crossterm::event::Event::Key(key))) => {
+                        if key.kind == crossterm::event::KeyEventKind::Press {
+                            handle_key(&mut state, key, &user_action_tx).await;
+                        }
                     }
+                    Some(Ok(crossterm::event::Event::Mouse(mouse))) => {
+                        match mouse.kind {
+                            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                                state.handle_mouse_down(mouse.row, mouse.column);
+                            }
+                            crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left) => {
+                                state.handle_mouse_drag(mouse.row, mouse.column);
+                            }
+                            crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
+                                if let Some(text) = state.handle_mouse_up() {
+                                    let _ = copy_to_clipboard_osc52(&text);
+                                    terminal.backend_mut().flush()?;
+                                }
+                            }
+                            crossterm::event::MouseEventKind::Moved => {
+                                let hovering = state.handle_hover(mouse.row, mouse.column);
+                                if hovering != was_hovering_toggle {
+                                    was_hovering_toggle = hovering;
+                                    if hovering {
+                                        execute!(terminal.backend_mut(), SetCursorStyle::SteadyUnderScore)?;
+                                    } else {
+                                        execute!(terminal.backend_mut(), SetCursorStyle::DefaultUserShape)?;
+                                    }
+                                    terminal.backend_mut().flush()?;
+                                }
+                            }
+                            crossterm::event::MouseEventKind::ScrollUp => {
+                                state.scroll_up(3);
+                            }
+                            crossterm::event::MouseEventKind::ScrollDown => {
+                                state.scroll_down(3);
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
                 }
+            }
+            _ = &mut drag_scroll_sleep, if state.drag_scroll_pos.is_some() => {
+                let (row, col) = state.drag_scroll_pos.unwrap();
+                state.handle_mouse_drag(row, col);
             }
         }
 
@@ -63,31 +114,60 @@ pub async fn run_tui(
     }
 
     disable_raw_mode()?;
+    execute!(terminal.backend_mut(), SetCursorStyle::DefaultUserShape)?;
+    execute!(terminal.backend_mut(), DisableMouseCapture)?;
     terminal.backend_mut().write_all(b"\x1b[?1007l")?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     Ok(())
 }
 
+const BASE64_TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn base64_encode(input: &[u8]) -> String {
+    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(BASE64_TABLE[((n >> 18) & 0x3F) as usize] as char);
+        out.push(BASE64_TABLE[((n >> 12) & 0x3F) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            BASE64_TABLE[((n >> 6) & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            BASE64_TABLE[(n & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+fn copy_to_clipboard_osc52(text: &str) -> std::io::Result<()> {
+    let encoded = base64_encode(text.as_bytes());
+    let seq = format!("\x1b]52;c;{}\x07", encoded);
+    std::io::stdout().write_all(seq.as_bytes())?;
+    std::io::stdout().flush()
+}
+
 async fn handle_key(
     state: &mut AppState,
     key: crossterm::event::KeyEvent,
     tx: &mpsc::Sender<UserAction>,
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
 ) {
     if state.mode == AppMode::SlashMenu {
         handle_slash_menu_key(state, key, tx).await;
         return;
     }
 
-    let mode_clone = state.mode.clone();
-    match mode_clone {
-        AppMode::Approval {
-            is_tty_command,
-            command,
-            ..
-        } => {
-            handle_approval_key(state, key, is_tty_command, command.as_deref(), tx, terminal).await;
+    match &state.mode {
+        AppMode::Approval { tool_call_id, .. } => {
+            let id = tool_call_id.clone();
+            handle_approval_key(state, key, &id, tx).await;
         }
         _ => {
             handle_chat_key(state, key, tx).await;
@@ -110,14 +190,7 @@ async fn handle_chat_key(
             let _ = tx.send(UserAction::Quit).await;
         }
         KeyCode::Esc => {
-            if state.is_streaming {
-                state.is_streaming = false;
-                state.thinking_buffer.clear();
-                state.text_buffer.clear();
-                state.mode = AppMode::Chat;
-                state.add_message("system", "[interrupted]", None);
-                let _ = tx.send(UserAction::Interrupt).await;
-            } else if let Some(msg) = state.queued_messages.pop_back() {
+            if let Some(msg) = state.queued_messages.pop_back() {
                 state.input = msg;
                 state.input_cursor_char = state.input.chars().count();
             }
@@ -145,13 +218,13 @@ async fn handle_chat_key(
 
             if state.is_streaming {
                 state.queued_messages.push_back(input.clone());
-                state.add_message(
+                state.add_chat(
                     "system",
                     &format!("[queued: {}]", input.chars().take(40).collect::<String>()),
                     None,
                 );
             } else {
-                state.add_message("user", &input, None);
+                state.add_chat("user", &input, None);
                 let _ = tx.send(UserAction::SendMessage { content: input }).await;
             }
         }
@@ -288,7 +361,7 @@ async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::Sende
                         c.name, aliases, c.description
                     ));
                 }
-                state.add_message("system", &help, None);
+                state.add_chat("system", &help, None);
             }
             "clear" => {
                 state.messages.clear();
@@ -300,7 +373,7 @@ async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::Sende
             }
             "verbose" | "v" => {
                 state.verbosity = state.verbosity.cycle();
-                state.add_message(
+                state.add_chat(
                     "system",
                     &format!("Verbosity: {}", state.verbosity.label()),
                     None,
@@ -308,7 +381,7 @@ async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::Sende
             }
             "thinking" | "think" => {
                 state.thinking_visible = !state.thinking_visible;
-                state.add_message(
+                state.add_chat(
                     "system",
                     &format!(
                         "Thinking display: {}",
@@ -319,23 +392,27 @@ async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::Sende
             }
             "model" => {
                 let model = state.model_name.clone();
-                state.add_message("system", &model, None);
+                state.add_chat("system", &model, None);
             }
             "history" | "h" => {
                 let count = state.messages.len();
-                let user_count = state.messages.iter().filter(|m| m.role == "user").count();
-                state.add_message(
+                let user_count = state
+                    .messages
+                    .iter()
+                    .filter(|m| matches!(m, DisplayMessage::Chat { role, .. } if role == "user"))
+                    .count();
+                state.add_chat(
                     "system",
                     &format!("{} messages ({} user)", count, user_count),
                     None,
                 );
             }
             _ => {
-                state.add_message("system", &format!("Unknown command: /{}", cmd_name), None);
+                state.add_chat("system", &format!("Unknown command: /{}", cmd_name), None);
             }
         }
     } else {
-        state.add_message(
+        state.add_chat(
             "system",
             &format!(
                 "Unknown command: /{}. Type /help for available commands.",
@@ -349,10 +426,8 @@ async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::Sende
 async fn handle_approval_key(
     state: &mut AppState,
     key: crossterm::event::KeyEvent,
-    is_tty_command: bool,
-    command: Option<&str>,
+    _tool_call_id: &str,
     tx: &mpsc::Sender<UserAction>,
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
 ) {
     let editing_feedback = state.approval_selected == ApprovalChoice::EditFeedback;
 
@@ -362,23 +437,16 @@ async fn handle_approval_key(
             let _ = tx.send(UserAction::Quit).await;
         }
         KeyCode::Esc => {
-            state.mode = AppMode::Chat;
-            let _ = tx.send(UserAction::RejectCommand { feedback: None }).await;
+            if editing_feedback {
+                state.approval_selected = ApprovalChoice::Reject;
+            }
         }
 
         KeyCode::Up => {
-            if editing_feedback {
-                state.approval_selected = ApprovalChoice::Reject;
-            } else {
-                state.scroll_up(3);
-            }
+            state.scroll_up(3);
         }
         KeyCode::Down => {
-            if editing_feedback {
-                // nop
-            } else {
-                state.scroll_down(3);
-            }
+            state.scroll_down(3);
         }
         KeyCode::PageUp => {
             state.scroll_up(10);
@@ -407,23 +475,11 @@ async fn handle_approval_key(
         KeyCode::Enter => match state.approval_selected {
             ApprovalChoice::Allow => {
                 state.mode = AppMode::Chat;
-                if is_tty_command {
-                    if let Some(cmd) = command {
-                        let output = run_interactive(terminal, cmd);
-                        state.handle_event(&AppEvent::CommandResult {
-                            output: output.clone(),
-                        });
-                        let _ = tx
-                            .send(UserAction::ApprovePendingWithResult { output })
-                            .await;
-                    }
-                } else {
-                    let _ = tx.send(UserAction::ApprovePending).await;
-                }
+                let _ = tx.send(UserAction::ApprovePending).await;
             }
             ApprovalChoice::Reject => {
                 state.mode = AppMode::Chat;
-                let _ = tx.send(UserAction::RejectCommand { feedback: None }).await;
+                let _ = tx.send(UserAction::RejectTool { feedback: None }).await;
             }
             ApprovalChoice::EditFeedback => {
                 if editing_feedback {
@@ -431,7 +487,7 @@ async fn handle_approval_key(
                     state.feedback_clear();
                     state.mode = AppMode::Chat;
                     let _ = tx
-                        .send(UserAction::RejectCommand {
+                        .send(UserAction::RejectTool {
                             feedback: Some(feedback),
                         })
                         .await;
@@ -443,23 +499,11 @@ async fn handle_approval_key(
 
         KeyCode::Char('y') if !editing_feedback => {
             state.mode = AppMode::Chat;
-            if is_tty_command {
-                if let Some(cmd) = command {
-                    let output = run_interactive(terminal, cmd);
-                    state.handle_event(&AppEvent::CommandResult {
-                        output: output.clone(),
-                    });
-                    let _ = tx
-                        .send(UserAction::ApprovePendingWithResult { output })
-                        .await;
-                }
-            } else {
-                let _ = tx.send(UserAction::ApprovePending).await;
-            }
+            let _ = tx.send(UserAction::ApprovePending).await;
         }
         KeyCode::Char('n') if !editing_feedback => {
             state.mode = AppMode::Chat;
-            let _ = tx.send(UserAction::RejectCommand { feedback: None }).await;
+            let _ = tx.send(UserAction::RejectTool { feedback: None }).await;
         }
 
         KeyCode::Char(c) if editing_feedback => {
@@ -486,35 +530,5 @@ fn prev_choice(current: ApprovalChoice) -> ApprovalChoice {
         ApprovalChoice::Allow => ApprovalChoice::EditFeedback,
         ApprovalChoice::Reject => ApprovalChoice::Allow,
         ApprovalChoice::EditFeedback => ApprovalChoice::Reject,
-    }
-}
-
-fn run_interactive(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, command: &str) -> String {
-    disable_raw_mode().ok();
-    execute!(io::stdout(), LeaveAlternateScreen).ok();
-
-    println!("$ {}", command);
-
-    let result = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(command)
-        .status();
-
-    execute!(io::stdout(), EnterAlternateScreen).ok();
-    io::stdout().write_all(b"\x1b[?1007h").ok();
-    io::stdout().flush().ok();
-    enable_raw_mode().ok();
-    terminal.clear().ok();
-
-    match result {
-        Ok(status) => {
-            let code = status.code().unwrap_or(-1);
-            if status.success() {
-                format!("[interactive command completed, exit code: {}]", code)
-            } else {
-                format!("[interactive command failed, exit code: {}]", code)
-            }
-        }
-        Err(e) => format!("[error: {}]", e),
     }
 }
