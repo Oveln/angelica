@@ -1,50 +1,4 @@
-use ratatui::style::{Color, Modifier, Style};
-
-use super::theme::Theme;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApprovalChoice {
-    Allow,
-    Reject,
-    EditFeedback,
-}
-
-impl ApprovalChoice {
-    pub const ALL: [ApprovalChoice; 3] = [
-        ApprovalChoice::Allow,
-        ApprovalChoice::Reject,
-        ApprovalChoice::EditFeedback,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            ApprovalChoice::Allow => "Allow",
-            ApprovalChoice::Reject => "Reject",
-            ApprovalChoice::EditFeedback => "Edit feedback",
-        }
-    }
-
-    pub fn style(self, selected: bool, theme: &Theme) -> Style {
-        if selected {
-            match self {
-                ApprovalChoice::Allow => Style::default()
-                    .fg(Color::Black)
-                    .bg(theme.success)
-                    .add_modifier(Modifier::BOLD),
-                ApprovalChoice::Reject => Style::default()
-                    .fg(Color::Black)
-                    .bg(theme.error)
-                    .add_modifier(Modifier::BOLD),
-                ApprovalChoice::EditFeedback => Style::default()
-                    .fg(Color::Black)
-                    .bg(theme.warning)
-                    .add_modifier(Modifier::BOLD),
-            }
-        } else {
-            Style::default().fg(theme.muted)
-        }
-    }
-}
+pub use crate::tui::mode::{AppMode, ApprovalChoice};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verbosity {
@@ -147,18 +101,6 @@ impl DisplayMessage {
             | DisplayMessage::Diff { hidden, .. } => *hidden,
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum AppMode {
-    Chat,
-    Approval {
-        tool_call_id: String,
-        tool_name: String,
-        tool_label: String,
-    },
-    Streaming,
-    SlashMenu,
 }
 
 pub struct ClickRange {

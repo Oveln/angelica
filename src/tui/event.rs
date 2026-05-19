@@ -1,5 +1,7 @@
 use crate::agent::events::AppEvent;
 
+use super::mode::AppMode;
+use super::mode::approval::ApprovalState;
 use super::state::AppState;
 use super::types::*;
 
@@ -59,44 +61,39 @@ impl AppState {
                 tool_name,
                 preview,
             } => {
-                self.approval_selected = ApprovalChoice::Allow;
-                self.feedback.clear();
-
                 let first_line = preview.lines().next().unwrap_or("");
 
                 let tool_label = if first_line.starts_with("$ ") {
-                    format!("→ {}", first_line)
+                    format!("\u{2192} {}", first_line)
                 } else if first_line.starts_with("---") || first_line.starts_with("diff ") {
                     let second = preview.lines().nth(1).unwrap_or("");
                     if let Some(path) = second.strip_prefix("+++ ") {
                         format!(
-                            "→ edit {}",
+                            "\u{2192} edit {}",
                             path.trim_start_matches('b').trim_start_matches('/')
                         )
                     } else {
-                        "→ edit".to_string()
+                        "\u{2192} edit".to_string()
                     }
                 } else {
-                    format!("→ {}", first_line)
+                    format!("\u{2192} {}", first_line)
                 };
 
                 let has_diff_content = preview.lines().count() > 1 || !preview.starts_with("$ ");
 
                 if has_diff_content {
-                    if let Some(last) = self.messages.last_mut() {
-                        if let DisplayMessage::Tool { hidden, .. } = last {
-                            *hidden = true;
-                        }
+                    if let Some(DisplayMessage::Tool { hidden, .. }) = self.messages.last_mut() {
+                        *hidden = true;
                     }
 
                     self.add_diff(preview.clone());
                 }
-                self.scroll_to_bottom();
-                self.mode = AppMode::Approval {
-                    tool_call_id: call_id.clone(),
-                    tool_name: tool_name.clone(),
+                self.scroll.to_bottom();
+                self.mode = AppMode::Approval(ApprovalState::new(
+                    call_id.clone(),
+                    tool_name.clone(),
                     tool_label,
-                };
+                ));
             }
             AppEvent::ToolRejected { call_id, feedback } => {
                 self.complete_tool(call_id, feedback.clone(), true);

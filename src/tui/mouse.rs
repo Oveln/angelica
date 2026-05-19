@@ -9,39 +9,39 @@ impl AppState {
             Some(v) => (v, col as usize),
             None => return,
         };
-        self.mouse_down_pos = Some((abs, col));
-        self.mouse_down_on_toggle = None;
+        self.mouse.mouse_down_pos = Some((abs, col));
+        self.mouse.mouse_down_on_toggle = None;
 
-        for range in self.clickable_ranges.iter() {
+        for range in self.viewport.clickable_ranges.iter() {
             if abs == range.line && col >= range.col_start && col < range.col_end {
-                self.mouse_down_on_toggle = Some((abs, col));
+                self.mouse.mouse_down_on_toggle = Some((abs, col));
                 return;
             }
         }
     }
 
     pub fn handle_mouse_drag(&mut self, row: u16, col: u16) {
-        if self.mouse_down_on_toggle.is_some() {
-            self.mouse_down_on_toggle = None;
+        if self.mouse.mouse_down_on_toggle.is_some() {
+            self.mouse.mouse_down_on_toggle = None;
         }
 
-        let Some((start_line, start_col)) = self.mouse_down_pos else {
+        let Some((start_line, start_col)) = self.mouse.mouse_down_pos else {
             return;
         };
 
-        let area = self.messages_area;
+        let area = self.viewport.messages_area;
         let col_usize = col as usize;
         let at_edge = row <= area.y || row >= area.y + area.height;
 
-        if self.selection.is_some() && at_edge {
+        if self.mouse.selection.is_some() && at_edge {
             if row <= area.y {
-                self.scroll_up(1);
+                self.scroll.up(1);
             } else {
-                self.scroll_down(1);
+                self.scroll.down(1);
             }
-            self.drag_scroll_pos = Some((row, col));
+            self.mouse.drag_scroll_pos = Some((row, col));
         } else if !at_edge {
-            self.drag_scroll_pos = None;
+            self.mouse.drag_scroll_pos = None;
         }
 
         let clamped_row = row.clamp(area.y, area.y + area.height.saturating_sub(1));
@@ -50,27 +50,29 @@ impl AppState {
             None => return,
         };
 
-        if self.selection.is_none() && (abs != start_line || col_usize.abs_diff(start_col) > 2) {
-            self.selection = Some((start_line, start_col, abs, col_usize));
-        } else if self.selection.is_some() {
-            let (s_line, s_col, _, _) = self.selection.unwrap();
-            self.selection = Some((s_line, s_col, abs, col_usize));
+        if self.mouse.selection.is_none()
+            && (abs != start_line || col_usize.abs_diff(start_col) > 2)
+        {
+            self.mouse.selection = Some((start_line, start_col, abs, col_usize));
+        } else if self.mouse.selection.is_some() {
+            let (s_line, s_col, _, _) = self.mouse.selection.unwrap();
+            self.mouse.selection = Some((s_line, s_col, abs, col_usize));
         }
     }
 
     pub fn handle_mouse_up(&mut self) -> Option<String> {
-        if let Some((_line, _col)) = self.mouse_down_on_toggle.take() {
-            for range in self.clickable_ranges.iter() {
+        if let Some((_line, _col)) = self.mouse.mouse_down_on_toggle.take() {
+            for range in self.viewport.clickable_ranges.iter() {
                 if _line == range.line && _col >= range.col_start && _col < range.col_end {
                     self.toggle_by_index(range.msg_index);
-                    self.hovered_msg_index = None;
+                    self.viewport.hovered_msg_index = None;
                     break;
                 }
             }
             return None;
         }
 
-        let copied = if let Some(sel) = self.selection.take() {
+        let copied = if let Some(sel) = self.mouse.selection.take() {
             let (sl, sc, el, ec) = sel;
             if sl != el || sc != ec {
                 Some(self.extract_selected_text(sl, sc, el, ec))
@@ -81,9 +83,9 @@ impl AppState {
             None
         };
 
-        self.mouse_down_pos = None;
-        self.mouse_down_on_toggle = None;
-        self.drag_scroll_pos = None;
+        self.mouse.mouse_down_pos = None;
+        self.mouse.mouse_down_on_toggle = None;
+        self.mouse.drag_scroll_pos = None;
         copied
     }
 
@@ -103,10 +105,10 @@ impl AppState {
 
         let mut result = String::new();
         for line_idx in sl..=el {
-            if line_idx >= self.cached_line_texts.len() {
+            if line_idx >= self.viewport.cached_line_texts.len() {
                 break;
             }
-            let text = &self.cached_line_texts[line_idx];
+            let text = &self.viewport.cached_line_texts[line_idx];
             if line_idx == sl && line_idx == el {
                 let sb = display_width_to_char_idx(sc, text);
                 let eb = display_width_to_char_idx(ec, text);
@@ -133,43 +135,39 @@ impl AppState {
         let abs = match abs {
             Some(v) => v,
             None => {
-                if self.hovered_msg_index.is_some() {
-                    self.hovered_msg_index = None;
+                if self.viewport.hovered_msg_index.is_some() {
+                    self.viewport.hovered_msg_index = None;
                 }
                 return false;
             }
         };
         let col = col as usize;
-        for range in self.clickable_ranges.iter() {
+        for range in self.viewport.clickable_ranges.iter() {
             if abs == range.line && col >= range.col_start && col < range.col_end {
-                if self.hovered_msg_index != Some(range.msg_index) {
-                    self.hovered_msg_index = Some(range.msg_index);
+                if self.viewport.hovered_msg_index != Some(range.msg_index) {
+                    self.viewport.hovered_msg_index = Some(range.msg_index);
                 }
                 return true;
             }
         }
-        if self.hovered_msg_index.is_some() {
-            self.hovered_msg_index = None;
+        if self.viewport.hovered_msg_index.is_some() {
+            self.viewport.hovered_msg_index = None;
         }
         false
     }
 
     fn screen_to_content(&self, row: u16) -> Option<usize> {
-        let area = self.messages_area;
+        let area = self.viewport.messages_area;
         if row < area.y || row >= area.y + area.height {
             return None;
         }
         let visible_row = (row - area.y) as usize;
         let visible_height = area.height as usize;
-        let padding = if self.content_height < visible_height {
-            visible_height - self.content_height
-        } else {
-            0
-        };
+        let padding = visible_height.saturating_sub(self.viewport.content_height);
         if visible_row < padding {
             return None;
         }
-        Some(self.content_top + visible_row - padding)
+        Some(self.viewport.content_top + visible_row - padding)
     }
 
     fn toggle_by_index(&mut self, idx: usize) {

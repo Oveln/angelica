@@ -93,7 +93,7 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
 
         if can_toggle && lines.len() > line_count_before {
             let toggle_line = lines.len() - 1;
-            let is_hovered = state.hovered_msg_index == Some(msg_idx);
+            let is_hovered = state.viewport.hovered_msg_index == Some(msg_idx);
             let style = toggle_style(theme, is_hovered);
             let toggle_text = format!(" {TOGGLE_LABEL}");
             let toggle_w = UnicodeWidthStr::width(toggle_text.as_str());
@@ -125,7 +125,7 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
         }
     }
 
-    if !state.thinking_buffer.is_empty() && state.thinking_visible {
+    if !state.thinking_buffer.is_empty() && state.display.thinking_visible {
         let glyph_style = Style::default()
             .fg(theme.assistant)
             .add_modifier(Modifier::BOLD);
@@ -173,7 +173,7 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
         }
     }
 
-    if let Some((sl, sc, el, ec)) = state.selection {
+    if let Some((sl, sc, el, ec)) = state.mouse.selection {
         let (sel_start_line, sel_start_col, sel_end_line, sel_end_col) =
             if sl < el || (sl == el && sc <= ec) {
                 (sl, sc, el, ec)
@@ -283,7 +283,7 @@ fn render_assistant_message(
     let theme = state.theme();
 
     if let Some(think) = thinking {
-        if state.thinking_visible && !think.is_empty() {
+        if state.display.thinking_visible && !think.is_empty() {
             let glyph_style = Style::default()
                 .fg(theme.assistant)
                 .add_modifier(Modifier::BOLD);

@@ -20,6 +20,7 @@ pub fn display_width_to_char_idx(width: usize, s: &str) -> usize {
     s.len()
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct InputBuffer {
     text: String,
     cursor: usize,

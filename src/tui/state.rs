@@ -6,62 +6,121 @@ use super::input::InputBuffer;
 use super::theme::Theme;
 use super::types::*;
 
-const QUIET_TOOLS: &[&str] = &[
-    "read_file",
-    "list_dir",
-    "query_sessions",
-    "update_agent_memory",
-    "update_user_profile",
-    "update_soul",
-];
+// ── Sub-structs ──────────────────────────────────────
 
-fn find_tool_by_call_id_mut<'a>(
-    messages: &'a mut [DisplayMessage],
-    call_id: &str,
-) -> Option<&'a mut DisplayMessage> {
-    messages.iter_mut().rev().find(|m| match m {
-        DisplayMessage::Tool { call_id: cid, .. } => cid == call_id,
-        _ => false,
-    })
-}
-
-pub struct AppState {
-    pub messages: Vec<DisplayMessage>,
-    pub thinking_buffer: String,
-    pub text_buffer: String,
-    pub mode: AppMode,
-    pub input: InputBuffer,
-    pub should_quit: bool,
+pub struct DisplayConfig {
     pub thinking_visible: bool,
     pub verbosity: Verbosity,
-    pub is_streaming: bool,
-
-    pub queued_messages: VecDeque<String>,
-
-    pub scroll_offset: usize,
-    pub pending_scroll_delta: i32,
-
-    pub approval_selected: ApprovalChoice,
-    pub feedback: InputBuffer,
-
-    pub slash_filter: String,
-    pub slash_selected: usize,
-    pub slash_matched: Vec<usize>,
-
-    pub model_name: String,
     pub theme: Theme,
+}
 
+pub struct ScrollState {
+    pub offset: usize,
+    pub pending_delta: i32,
+}
+
+pub struct ViewportState {
     pub clickable_ranges: Vec<ClickRange>,
     pub hovered_msg_index: Option<usize>,
     pub content_top: usize,
     pub content_height: usize,
     pub messages_area: Rect,
-
-    pub selection: Option<(usize, usize, usize, usize)>,
     pub cached_line_texts: Vec<String>,
+}
+
+pub struct MouseState {
+    pub selection: Option<(usize, usize, usize, usize)>,
     pub drag_scroll_pos: Option<(u16, u16)>,
     pub mouse_down_pos: Option<(usize, usize)>,
     pub mouse_down_on_toggle: Option<(usize, usize)>,
+}
+
+// ── Scroll methods ───────────────────────────────────
+
+const TAIL_SENTINEL: usize = usize::MAX;
+
+impl ScrollState {
+    pub fn is_at_tail(&self) -> bool {
+        self.offset == TAIL_SENTINEL
+    }
+
+    pub fn resolve_top(&self, max_start: usize) -> usize {
+        if self.offset == TAIL_SENTINEL {
+            max_start
+        } else {
+            self.offset.min(max_start)
+        }
+    }
+
+    pub fn up(&mut self, n: usize) {
+        self.pending_delta -= n as i32;
+    }
+
+    pub fn down(&mut self, n: usize) {
+        self.pending_delta += n as i32;
+    }
+
+    pub fn to_bottom(&mut self) {
+        self.offset = TAIL_SENTINEL;
+        self.pending_delta = 0;
+    }
+
+    pub fn apply_pending(&mut self, total_lines: usize, visible_lines: usize) {
+        let delta = self.pending_delta;
+        if delta == 0 {
+            return;
+        }
+        self.pending_delta = 0;
+
+        if total_lines <= visible_lines {
+            self.offset = TAIL_SENTINEL;
+            return;
+        }
+
+        let max_start = total_lines.saturating_sub(visible_lines);
+        let current = if self.offset == TAIL_SENTINEL {
+            max_start
+        } else {
+            self.offset.min(max_start)
+        };
+
+        let new_top = if delta < 0 {
+            current.saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            current.saturating_add(delta as usize).min(max_start)
+        };
+
+        self.offset = if new_top >= max_start {
+            TAIL_SENTINEL
+        } else {
+            new_top
+        };
+    }
+}
+
+// ── AppState ─────────────────────────────────────────
+
+pub struct AppState {
+    // Core content
+    pub messages: Vec<DisplayMessage>,
+    pub thinking_buffer: String,
+    pub text_buffer: String,
+    pub input: InputBuffer,
+    pub queued_messages: VecDeque<String>,
+
+    // Mode (carries mode-specific state)
+    pub mode: crate::tui::mode::AppMode,
+
+    // Flags
+    pub is_streaming: bool,
+    pub should_quit: bool,
+    pub model_name: String,
+
+    // Grouped state
+    pub display: DisplayConfig,
+    pub scroll: ScrollState,
+    pub viewport: ViewportState,
+    pub mouse: MouseState,
 }
 
 impl Default for AppState {
@@ -70,32 +129,35 @@ impl Default for AppState {
             messages: Vec::new(),
             thinking_buffer: String::new(),
             text_buffer: String::new(),
-            mode: AppMode::Chat,
             input: InputBuffer::new(),
-            should_quit: false,
-            thinking_visible: true,
-            verbosity: Verbosity::Normal,
-            is_streaming: false,
             queued_messages: VecDeque::new(),
-            scroll_offset: usize::MAX,
-            pending_scroll_delta: 0,
-            approval_selected: ApprovalChoice::Allow,
-            feedback: InputBuffer::new(),
-            slash_filter: String::new(),
-            slash_selected: 0,
-            slash_matched: Vec::new(),
+            mode: crate::tui::mode::AppMode::Chat,
+            is_streaming: false,
+            should_quit: false,
             model_name: String::new(),
-            theme: Theme::default(),
-            clickable_ranges: Vec::new(),
-            hovered_msg_index: None,
-            content_top: 0,
-            content_height: 0,
-            messages_area: Rect::default(),
-            selection: None,
-            cached_line_texts: Vec::new(),
-            drag_scroll_pos: None,
-            mouse_down_pos: None,
-            mouse_down_on_toggle: None,
+            display: DisplayConfig {
+                thinking_visible: true,
+                verbosity: Verbosity::Normal,
+                theme: Theme::default(),
+            },
+            scroll: ScrollState {
+                offset: usize::MAX,
+                pending_delta: 0,
+            },
+            viewport: ViewportState {
+                clickable_ranges: Vec::new(),
+                hovered_msg_index: None,
+                content_top: 0,
+                content_height: 0,
+                messages_area: Rect::default(),
+                cached_line_texts: Vec::new(),
+            },
+            mouse: MouseState {
+                selection: None,
+                drag_scroll_pos: None,
+                mouse_down_pos: None,
+                mouse_down_on_toggle: None,
+            },
         }
     }
 }
@@ -109,7 +171,7 @@ impl AppState {
     }
 
     pub fn theme(&self) -> &Theme {
-        &self.theme
+        &self.display.theme
     }
 
     pub fn add_chat(&mut self, role: &str, content: &str, thinking: Option<String>) {
@@ -163,7 +225,7 @@ impl AppState {
     }
 
     pub fn should_show_tool_result(&self, tool_name: &str) -> bool {
-        match self.verbosity {
+        match self.display.verbosity {
             Verbosity::Trace => true,
             Verbosity::Verbose => !QUIET_TOOLS.contains(&tool_name),
             Verbosity::Normal => false,
@@ -220,26 +282,34 @@ impl AppState {
     }
 
     pub fn update_slash_matches(&mut self) {
-        let filter = if self.input.starts_with('/') {
-            &self.input[1..]
-        } else {
-            ""
-        };
-        self.slash_filter = filter.to_string();
-        self.slash_matched.clear();
-        for (i, cmd) in BUILTIN_COMMANDS.iter().enumerate() {
-            if cmd.name.starts_with(filter) || cmd.aliases.iter().any(|a| a.starts_with(filter)) {
-                self.slash_matched.push(i);
-            }
-        }
-        if self.slash_selected >= self.slash_matched.len() {
-            self.slash_selected = 0;
+        if let crate::tui::mode::AppMode::SlashMenu(ref mut sm) = self.mode {
+            sm.update_matches(self.input.as_str());
         }
     }
 
     pub fn slash_selected_cmd(&self) -> Option<&SlashCommand> {
-        self.slash_matched
-            .get(self.slash_selected)
-            .and_then(|&i| BUILTIN_COMMANDS.get(i))
+        match &self.mode {
+            crate::tui::mode::AppMode::SlashMenu(sm) => sm.selected_cmd(),
+            _ => None,
+        }
     }
 }
+
+fn find_tool_by_call_id_mut<'a>(
+    messages: &'a mut [DisplayMessage],
+    call_id: &str,
+) -> Option<&'a mut DisplayMessage> {
+    messages.iter_mut().rev().find(|m| match m {
+        DisplayMessage::Tool { call_id: cid, .. } => cid == call_id,
+        _ => false,
+    })
+}
+
+const QUIET_TOOLS: &[&str] = &[
+    "read_file",
+    "list_dir",
+    "query_sessions",
+    "update_agent_memory",
+    "update_user_profile",
+    "update_soul",
+];
