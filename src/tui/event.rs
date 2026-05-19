@@ -1,0 +1,109 @@
+use crate::agent::events::AppEvent;
+
+use super::state::AppState;
+use super::types::*;
+
+impl AppState {
+    pub fn handle_event(&mut self, event: &AppEvent) {
+        match event {
+            AppEvent::ThinkingDelta { delta } => {
+                self.thinking_buffer.push_str(delta);
+                self.mode = AppMode::Streaming;
+                self.is_streaming = true;
+            }
+            AppEvent::TextDelta { delta } => {
+                self.text_buffer.push_str(delta);
+                self.mode = AppMode::Streaming;
+                self.is_streaming = true;
+            }
+            AppEvent::TextDone { full_text } => {
+                let thinking = if self.thinking_buffer.is_empty() {
+                    None
+                } else {
+                    Some(std::mem::take(&mut self.thinking_buffer))
+                };
+                self.add_chat("assistant", full_text, thinking);
+                self.text_buffer.clear();
+            }
+            AppEvent::TurnComplete => {
+                self.is_streaming = false;
+                self.mode = AppMode::Chat;
+            }
+            AppEvent::ToolResult {
+                call_id,
+                name,
+                result,
+            } => {
+                let show = self.should_show_tool_result(name);
+                self.complete_tool(call_id, result.clone(), !show);
+            }
+            AppEvent::ToolCalling {
+                call_id,
+                name,
+                arguments,
+            } => {
+                if !self.text_buffer.is_empty() {
+                    let thinking = if self.thinking_buffer.is_empty() {
+                        None
+                    } else {
+                        Some(std::mem::take(&mut self.thinking_buffer))
+                    };
+                    let text = std::mem::take(&mut self.text_buffer);
+                    self.add_chat("assistant", &text, thinking);
+                }
+                let display = self.format_tool_args(name, arguments);
+                self.add_tool_call(call_id.clone(), name.clone(), display);
+            }
+            AppEvent::ApprovalPending {
+                call_id,
+                tool_name,
+                preview,
+            } => {
+                self.approval_selected = ApprovalChoice::Allow;
+                self.feedback.clear();
+
+                let first_line = preview.lines().next().unwrap_or("");
+
+                let tool_label = if first_line.starts_with("$ ") {
+                    format!("→ {}", first_line)
+                } else if first_line.starts_with("---") || first_line.starts_with("diff ") {
+                    let second = preview.lines().nth(1).unwrap_or("");
+                    if let Some(path) = second.strip_prefix("+++ ") {
+                        format!(
+                            "→ edit {}",
+                            path.trim_start_matches('b').trim_start_matches('/')
+                        )
+                    } else {
+                        "→ edit".to_string()
+                    }
+                } else {
+                    format!("→ {}", first_line)
+                };
+
+                let has_diff_content = preview.lines().count() > 1 || !preview.starts_with("$ ");
+
+                if has_diff_content {
+                    if let Some(last) = self.messages.last_mut() {
+                        if let DisplayMessage::Tool { hidden, .. } = last {
+                            *hidden = true;
+                        }
+                    }
+
+                    self.add_diff(preview.clone());
+                }
+                self.scroll_to_bottom();
+                self.mode = AppMode::Approval {
+                    tool_call_id: call_id.clone(),
+                    tool_name: tool_name.clone(),
+                    tool_label,
+                };
+            }
+            AppEvent::ToolRejected { call_id, feedback } => {
+                self.complete_tool(call_id, feedback.clone(), true);
+            }
+            AppEvent::Error { message } => {
+                self.add_chat("system", &format!("Error: {}", message), None);
+            }
+        }
+    }
+}

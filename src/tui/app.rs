@@ -10,7 +10,8 @@ use std::io::{self, Write};
 use tokio::sync::mpsc;
 
 use crate::agent::events::{AppEvent, UserAction};
-use crate::tui::ui::{AppMode, AppState, ApprovalChoice, BUILTIN_COMMANDS, DisplayMessage};
+use crate::tui::state::AppState;
+use crate::tui::types::{AppMode, ApprovalChoice, BUILTIN_COMMANDS, DisplayMessage};
 
 pub async fn run_tui(
     mut app_event_rx: mpsc::Receiver<AppEvent>,
@@ -33,10 +34,12 @@ pub async fn run_tui(
     tokio::pin!(drag_scroll_sleep);
 
     loop {
-        terminal.draw(|f| crate::tui::ui::draw(f, &mut state))?;
+        terminal.draw(|f| crate::tui::draw::draw(f, &mut state))?;
 
         if state.drag_scroll_pos.is_some() {
-            drag_scroll_sleep.as_mut().reset(tokio::time::Instant::now() + std::time::Duration::from_millis(80));
+            drag_scroll_sleep
+                .as_mut()
+                .reset(tokio::time::Instant::now() + std::time::Duration::from_millis(80));
         }
 
         tokio::select! {
@@ -191,8 +194,7 @@ async fn handle_chat_key(
         }
         KeyCode::Esc => {
             if let Some(msg) = state.queued_messages.pop_back() {
-                state.input = msg;
-                state.input_cursor_char = state.input.chars().count();
+                state.input.set(msg);
             }
         }
         KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -210,11 +212,11 @@ async fn handle_chat_key(
 
             if input.starts_with('/') {
                 execute_slash_command(state, &input[1..], tx).await;
-                state.input_clear();
+                state.input.clear();
                 return;
             }
 
-            state.input_clear();
+            state.input.clear();
 
             if state.is_streaming {
                 state.queued_messages.push_back(input.clone());
@@ -229,29 +231,28 @@ async fn handle_chat_key(
             }
         }
         KeyCode::Char('/') if state.input.is_empty() => {
-            state.input_insert('/');
+            state.input.insert('/');
             state.mode = AppMode::SlashMenu;
             state.update_slash_matches();
         }
         KeyCode::Up => {
             if state.input.is_empty() && !state.queued_messages.is_empty() {
                 if let Some(msg) = state.queued_messages.pop_back() {
-                    state.input = msg;
-                    state.input_cursor_char = state.input.chars().count();
+                    state.input.set(msg);
                 }
             } else {
                 state.scroll_up(3);
             }
         }
         KeyCode::Char(c) => {
-            state.input_insert(c);
+            state.input.insert(c);
             if state.input.starts_with('/') && state.input.chars().count() <= 15 {
                 state.mode = AppMode::SlashMenu;
                 state.update_slash_matches();
             }
         }
         KeyCode::Backspace => {
-            state.input_backspace();
+            state.input.backspace();
             if state.input.starts_with('/') {
                 state.update_slash_matches();
                 if state.input == "/" {
@@ -263,11 +264,11 @@ async fn handle_chat_key(
                 }
             }
         }
-        KeyCode::Delete => state.input_delete(),
-        KeyCode::Left => state.input_move_left(),
-        KeyCode::Right => state.input_move_right(),
-        KeyCode::Home => state.input_move_home(),
-        KeyCode::End => state.input_move_end(),
+        KeyCode::Delete => state.input.delete(),
+        KeyCode::Left => state.input.move_left(),
+        KeyCode::Right => state.input.move_right(),
+        KeyCode::Home => state.input.move_home(),
+        KeyCode::End => state.input.move_end(),
         KeyCode::Down => state.scroll_down(3),
         KeyCode::PageUp => state.scroll_up(10),
         KeyCode::PageDown => state.scroll_down(10),
@@ -282,7 +283,7 @@ async fn handle_slash_menu_key(
 ) {
     match key.code {
         KeyCode::Esc => {
-            state.input_clear();
+            state.input.clear();
             state.mode = if state.is_streaming {
                 AppMode::Streaming
             } else {
@@ -301,24 +302,23 @@ async fn handle_slash_menu_key(
         }
         KeyCode::Tab => {
             if let Some(cmd) = state.slash_selected_cmd() {
-                state.input = format!("/{}", cmd.name);
-                state.input_cursor_char = state.input.chars().count();
+                state.input.set(format!("/{}", cmd.name));
                 state.update_slash_matches();
             }
         }
         KeyCode::Enter => {
             if let Some(cmd) = state.slash_selected_cmd() {
                 let name = cmd.name.to_string();
-                state.input_clear();
+                state.input.clear();
                 state.mode = AppMode::Chat;
                 execute_slash_command(state, &name, tx).await;
             }
         }
         KeyCode::Backspace => {
-            state.input_backspace();
+            state.input.backspace();
             state.update_slash_matches();
             if !state.input.starts_with('/') || state.input == "/" {
-                state.input_clear();
+                state.input.clear();
                 state.mode = if state.is_streaming {
                     AppMode::Streaming
                 } else {
@@ -327,7 +327,7 @@ async fn handle_slash_menu_key(
             }
         }
         KeyCode::Char(c) => {
-            state.input_insert(c);
+            state.input.insert(c);
             state.update_slash_matches();
         }
         _ => {}
@@ -456,14 +456,14 @@ async fn handle_approval_key(
         }
         KeyCode::Left => {
             if editing_feedback {
-                state.feedback_move_left();
+                state.feedback.move_left();
             } else {
                 state.approval_selected = prev_choice(state.approval_selected);
             }
         }
         KeyCode::Right => {
             if editing_feedback {
-                state.feedback_move_right();
+                state.feedback.move_right();
             } else {
                 state.approval_selected = next_choice(state.approval_selected);
             }
@@ -483,8 +483,8 @@ async fn handle_approval_key(
             }
             ApprovalChoice::EditFeedback => {
                 if editing_feedback {
-                    let feedback = state.approval_feedback.trim().to_string();
-                    state.feedback_clear();
+                    let feedback = state.feedback.trim().to_string();
+                    state.feedback.clear();
                     state.mode = AppMode::Chat;
                     let _ = tx
                         .send(UserAction::RejectTool {
@@ -507,10 +507,10 @@ async fn handle_approval_key(
         }
 
         KeyCode::Char(c) if editing_feedback => {
-            state.feedback_insert(c);
+            state.feedback.insert(c);
         }
         KeyCode::Backspace if editing_feedback => {
-            state.feedback_backspace();
+            state.feedback.backspace();
         }
 
         _ => {}

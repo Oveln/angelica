@@ -3,10 +3,11 @@ use ratatui::text::{Line, Span, Text};
 use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
 
+use super::state::AppState;
 use super::theme::{
     ASSISTANT_GLYPH, CARD_BOT, CARD_MID, CARD_TOP, RAIL, THINKING_RAIL, TOOL_GLYPH, USER_GLYPH,
 };
-use super::ui::{AppState, ClickRange, DisplayMessage};
+use super::types::{ClickRange, DisplayMessage};
 
 const TOGGLE_LABEL: &str = "[toggle]";
 
@@ -39,11 +40,22 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
                 ..
             } => match role.as_str() {
                 "user" => render_glyph_lines(
-                    &mut lines, content, USER_GLYPH, theme.user, theme.user, theme.rail,
+                    &mut lines,
+                    content,
+                    USER_GLYPH,
+                    theme.user,
+                    theme.user,
+                    theme.rail,
                     terminal_width,
                 ),
                 "assistant" => {
-                    render_assistant_message(&mut lines, state, content, thinking.as_deref(), terminal_width);
+                    render_assistant_message(
+                        &mut lines,
+                        state,
+                        content,
+                        thinking.as_deref(),
+                        terminal_width,
+                    );
                 }
                 "system" => {
                     render_system_message(&mut lines, content, *collapsed, theme, terminal_width);
@@ -234,9 +246,15 @@ fn render_glyph_lines(
 
     for (i, line) in content.lines().enumerate() {
         let (prefix_w, prefix_span) = if i == 0 {
-            (glyph_prefix_w, Some(Span::styled(glyph.to_string(), glyph_style)))
+            (
+                glyph_prefix_w,
+                Some(Span::styled(glyph.to_string(), glyph_style)),
+            )
         } else {
-            (rail_prefix_w, Some(Span::styled(RAIL.to_string(), rail_style)))
+            (
+                rail_prefix_w,
+                Some(Span::styled(RAIL.to_string(), rail_style)),
+            )
         };
         let content_w = max_w.saturating_sub(prefix_w);
         let wrapped = wrap_str(line, content_w);

@@ -66,8 +66,17 @@ pub(super) fn render_diff_lines(
             lines.push(Line::from(vec![
                 Span::styled(CARD_MID.to_string(), rail),
                 Span::styled(gutter_prefix, Style::default().fg(theme.success).bg(bg)),
-                Span::styled("+ ".to_string(), Style::default().fg(theme.success).bg(bg).add_modifier(Modifier::BOLD)),
-                Span::styled(content.to_string(), Style::default().fg(Color::White).bg(bg)),
+                Span::styled(
+                    "+ ".to_string(),
+                    Style::default()
+                        .fg(theme.success)
+                        .bg(bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    content.to_string(),
+                    Style::default().fg(Color::White).bg(bg),
+                ),
                 Span::styled(" ".repeat(pad_w), Style::default().bg(bg)),
             ]));
             if let Some(n) = new_line.as_mut() {
@@ -89,8 +98,17 @@ pub(super) fn render_diff_lines(
             lines.push(Line::from(vec![
                 Span::styled(CARD_MID.to_string(), rail),
                 Span::styled(gutter_prefix, Style::default().fg(theme.error).bg(bg)),
-                Span::styled("- ".to_string(), Style::default().fg(theme.error).bg(bg).add_modifier(Modifier::BOLD)),
-                Span::styled(content.to_string(), Style::default().fg(Color::White).bg(bg)),
+                Span::styled(
+                    "- ".to_string(),
+                    Style::default()
+                        .fg(theme.error)
+                        .bg(bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    content.to_string(),
+                    Style::default().fg(Color::White).bg(bg),
+                ),
                 Span::styled(" ".repeat(pad_w), Style::default().bg(bg)),
             ]));
             if let Some(n) = old_line.as_mut() {
@@ -109,7 +127,10 @@ pub(super) fn render_diff_lines(
             lines.push(Line::from(vec![
                 Span::styled(CARD_MID.to_string(), panel_rail),
                 Span::styled(gutter_text, Style::default().fg(theme.rail).bg(panel_bg)),
-                Span::styled(content.to_string(), Style::default().fg(theme.input).bg(panel_bg)),
+                Span::styled(
+                    content.to_string(),
+                    Style::default().fg(theme.input).bg(panel_bg),
+                ),
                 Span::styled(" ".repeat(pad_w), panel_rail),
             ]));
             if let Some(n) = old_line.as_mut() {

@@ -476,7 +476,11 @@ impl Agent {
         true
     }
 
-    pub async fn reject_pending(&mut self, feedback: &str, event_tx: &mpsc::Sender<AppEvent>) -> bool {
+    pub async fn reject_pending(
+        &mut self,
+        feedback: &str,
+        event_tx: &mpsc::Sender<AppEvent>,
+    ) -> bool {
         let pending = match self.pending_approval.take() {
             Some(p) => p,
             None => return false,

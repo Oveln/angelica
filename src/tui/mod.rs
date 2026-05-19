@@ -1,5 +1,11 @@
 pub mod app;
 mod diff;
+mod draw;
+mod event;
+pub mod input;
+mod mouse;
 mod render;
+mod scroll;
+pub mod state;
 mod theme;
-pub mod ui;
+pub mod types;
