@@ -114,6 +114,11 @@ impl Agent {
     }
 
     pub async fn initialize(&mut self) -> anyhow::Result<()> {
+        if !self.llm.is_configured() {
+            anyhow::bail!(
+                "API key not configured. Set api_key in config, or set DEEPSEEK_API_KEY / OPENAI_API_KEY environment variable."
+            );
+        }
         self.mcp = McpClientManager::connect_all(&self.config.mcp).await?;
         Ok(())
     }
@@ -202,8 +207,23 @@ impl Agent {
         match group {
             ToolCallGroup::Single { tc } => {
                 let name = tc.function.name.clone();
+                let tc_id = tc.id.clone();
                 let args: serde_json::Value =
-                    serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::Value::Null);
+                    match serde_json::from_str(&tc.function.arguments) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            let msg = format!("Invalid JSON in tool call arguments: {}", e);
+                            self.history.record_tool_result(tc_id.clone(), msg.clone());
+                            let _ = event_tx
+                                .send(AppEvent::ToolResult {
+                                    call_id: tc_id,
+                                    name: name.clone(),
+                                    result: msg,
+                                })
+                                .await;
+                            return ProcessOutcome::Continue;
+                        }
+                    };
 
                 if self.tools.is_auto_execute(&name) {
                     let _ = event_tx
@@ -309,6 +329,9 @@ impl Agent {
         let max_iterations = self.config.llm.max_iterations as usize;
 
         loop {
+            if event_tx.is_closed() {
+                return false;
+            }
             while let Some(group) = self.tool_queue.pop_front() {
                 match self.process_one_group(group, event_tx).await {
                     ProcessOutcome::Continue => continue,

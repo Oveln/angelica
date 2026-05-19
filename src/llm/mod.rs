@@ -14,6 +14,10 @@ pub struct LlmClient {
 }
 
 impl LlmClient {
+    pub fn is_configured(&self) -> bool {
+        !self.api_key.is_empty()
+    }
+
     pub fn new(config: &LlmConfig) -> Self {
         let api_key = config
             .api_key
