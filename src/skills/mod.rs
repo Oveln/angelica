@@ -119,6 +119,10 @@ impl SkillRegistry {
     pub fn get_all_skills(&self) -> Vec<&SkillDef> {
         self.skills.values().filter(|s| s.enabled).collect()
     }
+
+    pub fn get(&self, name: &str) -> Option<&SkillDef> {
+        self.skills.get(name).filter(|s| s.enabled)
+    }
 }
 
 #[cfg(test)]

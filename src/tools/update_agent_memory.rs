@@ -30,7 +30,7 @@ impl Tool for UpdateAgentMemoryTool {
         use crate::permission::{PermissionAction, TargetRule};
         vec![TargetRule {
             target: "*".to_string(),
-            action: PermissionAction::Ask,
+            action: PermissionAction::Allow,
         }]
     }
 

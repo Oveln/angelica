@@ -3,6 +3,7 @@ pub mod list_dir;
 pub mod query_sessions;
 pub mod read_file;
 pub mod run_command;
+pub mod skill;
 pub mod update_agent_memory;
 pub mod update_soul;
 pub mod update_user_profile;
@@ -18,6 +19,7 @@ use crate::llm::types::ToolSpec;
 use crate::memory::MemoryManager;
 use crate::permission::TargetRule;
 use crate::session::SessionManager;
+use crate::skills::SkillRegistry;
 
 #[async_trait]
 pub trait Tool: Send + Sync {
@@ -55,7 +57,11 @@ impl ToolRegistry {
         }
     }
 
-    pub fn with_defaults(memory: Arc<MemoryManager>, sessions: Arc<SessionManager>) -> Self {
+    pub fn with_defaults(
+        memory: Arc<MemoryManager>,
+        sessions: Arc<SessionManager>,
+        skills: Arc<SkillRegistry>,
+    ) -> Self {
         let mut reg = Self::new();
         reg.register(Box::new(update_agent_memory::UpdateAgentMemoryTool::new(
             memory.clone(),
@@ -65,6 +71,7 @@ impl ToolRegistry {
         )));
         reg.register(Box::new(update_soul::UpdateSoulTool::new(memory)));
         reg.register(Box::new(query_sessions::QuerySessionsTool::new(sessions)));
+        reg.register(Box::new(skill::SkillTool::new(skills)));
         reg.register(Box::new(run_command::RunCommandTool));
         reg.register(Box::new(read_file::ReadFileTool));
         reg.register(Box::new(write_file::WriteFileTool));
