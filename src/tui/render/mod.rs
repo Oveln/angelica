@@ -72,6 +72,7 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
             DisplayMessage::Tool {
                 args_display,
                 result,
+                diff_preview,
                 collapsed,
                 ..
             } => {
@@ -79,6 +80,7 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
                     &mut lines,
                     args_display,
                     result.as_deref(),
+                    diff_preview.as_deref(),
                     *collapsed,
                     theme,
                     terminal_width,

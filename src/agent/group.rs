@@ -12,6 +12,7 @@ pub(super) struct PendingApproval {
     pub args: serde_json::Value,
     pub display_args: String,
     pub batched_edits: Option<Vec<BatchedEdit>>,
+    pub preview: Option<String>,
 }
 
 // ── Tool call grouping ──

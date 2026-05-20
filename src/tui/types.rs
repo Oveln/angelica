@@ -89,6 +89,7 @@ pub enum DisplayMessage {
         name: String,
         args_display: String,
         result: Option<String>,
+        diff_preview: Option<String>,
         collapsed: bool,
         hidden: bool,
     },

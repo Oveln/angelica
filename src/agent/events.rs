@@ -22,6 +22,7 @@ pub enum AppEvent {
         call_id: String,
         name: String,
         result: String,
+        diff_preview: Option<String>,
     },
 
     ApprovalPending {

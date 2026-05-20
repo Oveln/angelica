@@ -190,20 +190,29 @@ impl AppState {
             name,
             args_display,
             result: None,
+            diff_preview: None,
             collapsed: true,
             hidden: false,
         });
     }
 
-    pub fn complete_tool(&mut self, call_id: &str, result: String, force_collapsed: bool) {
+    pub fn complete_tool(
+        &mut self,
+        call_id: &str,
+        result: String,
+        diff_preview: Option<String>,
+        force_collapsed: bool,
+    ) {
         if let Some(DisplayMessage::Tool {
             result: r,
+            diff_preview: dp,
             collapsed,
             hidden,
             ..
         }) = find_tool_by_call_id_mut(&mut self.messages, call_id)
         {
             *r = Some(result);
+            *dp = diff_preview;
             *collapsed = force_collapsed;
             *hidden = false;
         }

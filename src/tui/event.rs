@@ -35,9 +35,15 @@ impl AppState {
                 call_id,
                 name,
                 result,
+                diff_preview,
             } => {
                 let show = self.should_show_tool_result(name);
-                self.complete_tool(call_id, result.clone(), !show);
+                self.complete_tool(
+                    call_id,
+                    result.clone(),
+                    diff_preview.clone(),
+                    !show,
+                );
             }
             AppEvent::ToolCalling {
                 call_id,
@@ -98,7 +104,7 @@ impl AppState {
                 ));
             }
             AppEvent::ToolRejected { call_id, feedback } => {
-                self.complete_tool(call_id, feedback.clone(), true);
+                self.complete_tool(call_id, feedback.clone(), None, true);
             }
             AppEvent::Error { message } => {
                 self.add_chat("system", &format!("Error: {}", message), None);

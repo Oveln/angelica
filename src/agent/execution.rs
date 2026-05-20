@@ -44,6 +44,7 @@ impl Agent {
                                 call_id: tc_id,
                                 name: name.clone(),
                                 result: msg,
+                                diff_preview: None,
                             })
                             .await;
                         return ProcessOutcome::Continue;
@@ -60,6 +61,11 @@ impl Agent {
                 tracing::info!("evaluate result: {:?}", action);
                 match action {
                     PermissionAction::Allow => {
+                        let diff_preview = self
+                            .tools
+                            .get(&name)
+                            .and_then(|t| t.preview(args.clone()).ok().flatten());
+
                         let _ = event_tx
                             .send(AppEvent::ToolCalling {
                                 call_id: tc.id.clone(),
@@ -73,6 +79,7 @@ impl Agent {
                                 call_id: tc.id.clone(),
                                 name: name.clone(),
                                 result: result.clone(),
+                                diff_preview,
                             })
                             .await;
                         self.history.record_tool_result(tc.id, result);
@@ -86,12 +93,15 @@ impl Agent {
                                 call_id: tc.id,
                                 name: name,
                                 result: msg,
+                                diff_preview: None,
                             })
                             .await;
                         ProcessOutcome::Continue
                     }
                     PermissionAction::Ask => {
                         let preview = self.make_approval_preview(&name, &args, None);
+
+                        let diff_preview = Self::extract_diff_preview(&preview);
 
                         let tc_id = tc.id.clone();
                         let _ = event_tx
@@ -111,6 +121,7 @@ impl Agent {
                             args,
                             display_args: tc.function.arguments.clone(),
                             batched_edits: None,
+                            preview: diff_preview,
                         });
 
                         ProcessOutcome::NeedApproval
@@ -136,6 +147,13 @@ impl Agent {
                             "count": edits.len(),
                         }))
                         .unwrap_or_default();
+
+                        let diff_preview = crate::tools::edit_file::preview_batched(
+                            &path,
+                            &searches_replaces,
+                        )
+                        .ok();
+
                         for e in &edits {
                             let _ = event_tx
                                 .send(AppEvent::ToolCalling {
@@ -160,6 +178,7 @@ impl Agent {
                                     call_id: e.tc_id.clone(),
                                     name: "edit_file".to_string(),
                                     result: result.clone(),
+                                    diff_preview: diff_preview.clone(),
                                 })
                                 .await;
                         }
@@ -175,6 +194,7 @@ impl Agent {
                                     call_id: e.tc_id.clone(),
                                     name: "edit_file".to_string(),
                                     result: msg.clone(),
+                                    diff_preview: None,
                                 })
                                 .await;
                         }
@@ -224,6 +244,7 @@ impl Agent {
                             args: serde_json::json!({"path": path}),
                             display_args,
                             batched_edits: Some(batched),
+                            preview: Self::extract_diff_preview(&preview),
                         });
 
                         let _ = event_tx
@@ -375,6 +396,31 @@ impl Agent {
         format!("[{}]\nArguments: {}", name, args)
     }
 
+    fn extract_diff_preview(preview: &str) -> Option<String> {
+        let first_line = preview.lines().next().unwrap_or("");
+        if !first_line.starts_with("---") && !first_line.starts_with("diff ") {
+            return None;
+        }
+        // Strip trailing non-diff summary lines (e.g. "Replaced 1 occurrence in foo.rs")
+        let all: Vec<&str> = preview.lines().collect();
+        let diff_end = all
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, l)| {
+                l.starts_with(' ')
+                    || l.starts_with('+')
+                    || l.starts_with('-')
+                    || l.starts_with('@')
+                    || l.starts_with("diff ")
+                    || l.starts_with("---")
+                    || l.starts_with("+++")
+            })
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        Some(all[..=diff_end].join("\n"))
+    }
+
     pub async fn approve_pending(&mut self, event_tx: &mpsc::Sender<AppEvent>) -> bool {
         let pending = match self.pending_approval.take() {
             Some(p) => p,
@@ -412,6 +458,7 @@ impl Agent {
                     call_id: tc_id.clone(),
                     name: pending.tool_name.clone(),
                     result: result.clone(),
+                    diff_preview: pending.preview.clone(),
                 })
                 .await;
         }
