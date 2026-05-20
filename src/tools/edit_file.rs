@@ -44,103 +44,129 @@ impl Tool for EditFileTool {
     }
 
     fn preview(&self, args: Value) -> anyhow::Result<Option<String>> {
-        let path_str = args["path"]
-            .as_str()
-            .filter(|s| !s.trim().is_empty())
-            .ok_or_else(|| anyhow::anyhow!("missing 'path' argument"))?;
-        let search = args["search"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'search' argument"))?;
-        let replace = args["replace"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'replace' argument"))?;
-
-        if search == replace {
-            return Err(anyhow::anyhow!("search and replace are identical"));
-        }
-
-        let path = Path::new(path_str);
-        let contents = fs::read_to_string(path)
-            .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
-
-        let count = contents.matches(search).count();
-        if count == 0 {
-            return Err(anyhow::anyhow!(
-                "Search string not found in {}",
-                path.display()
-            ));
-        }
-        if count > 1 {
-            let line_numbers: Vec<usize> = contents
-                .lines()
-                .enumerate()
-                .filter(|(_, line)| line.contains(search))
-                .map(|(i, _)| i + 1)
-                .collect();
-            return Err(anyhow::anyhow!(
-                "Search string found {} times in {} (at lines {}). Provide a longer/more specific search string to uniquely identify the location.",
-                count,
-                path.display(),
-                line_numbers
-                    .iter()
-                    .map(|n| n.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-
-        let updated = contents.replacen(search, replace, 1);
-        let diff = make_unified_diff(path_str, &contents, &updated);
-
+        let v = validate_single_args(&args)?;
+        let diff = make_unified_diff(&v.path_str, &v.original, &v.updated);
         Ok(Some(format!(
             "{}\nReplaced 1 occurrence in {}",
             diff,
-            path.display()
+            v.path.display()
         )))
     }
 
     async fn execute(&self, args: Value) -> anyhow::Result<String> {
-        let path_str = args["path"]
-            .as_str()
-            .filter(|s| !s.trim().is_empty())
-            .ok_or_else(|| anyhow::anyhow!("missing 'path' argument"))?;
-        let search = args["search"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'search' argument"))?;
-        let replace = args["replace"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'replace' argument"))?;
+        let v = validate_single_args(&args)?;
+        let path_display = v.path.display().to_string();
+        fs::write(&v.path, &v.updated)
+            .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", path_display, e))?;
+        Ok(format!("Replaced 1 occurrence in {}", path_display))
+    }
+}
 
+struct ValidatedSingle {
+    path: std::path::PathBuf,
+    path_str: String,
+    original: String,
+    updated: String,
+}
+
+fn validate_single_args(args: &Value) -> anyhow::Result<ValidatedSingle> {
+    let path_str = args["path"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing 'path' argument"))?;
+    let search = args["search"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("missing 'search' argument"))?;
+    let replace = args["replace"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("missing 'replace' argument"))?;
+
+    let path = Path::new(path_str);
+    let (original, updated) = validate_and_apply_one(path, search, replace)?;
+    Ok(ValidatedSingle {
+        path: path.to_path_buf(),
+        path_str: path_str.to_string(),
+        original,
+        updated,
+    })
+}
+
+fn validate_and_apply_one(path: &Path, search: &str, replace: &str) -> anyhow::Result<(String, String)> {
+    if search == replace {
+        return Err(anyhow::anyhow!("search and replace are identical"));
+    }
+
+    let contents = fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
+
+    let count = contents.matches(search).count();
+    if count == 0 {
+        return Err(anyhow::anyhow!(
+            "Search string not found in {}",
+            path.display()
+        ));
+    }
+    if count > 1 {
+        let line_numbers: Vec<usize> = contents
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| line.contains(search))
+            .map(|(i, _)| i + 1)
+            .collect();
+        return Err(anyhow::anyhow!(
+            "Search string found {} times in {} (at lines {}). Provide a longer/more specific search string to uniquely identify the location.",
+            count,
+            path.display(),
+            line_numbers
+                .iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    let updated = contents.replacen(search, replace, 1);
+    Ok((contents, updated))
+}
+
+fn validate_and_apply_batched(
+    path: &Path,
+    edits: &[(String, String)],
+    label: &str,
+) -> anyhow::Result<(String, String)> {
+    let mut current = fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
+
+    for (i, (search, replace)) in edits.iter().enumerate() {
         if search == replace {
-            return Err(anyhow::anyhow!("search and replace are identical"));
+            return Err(anyhow::anyhow!(
+                "Edit {} in {}: search and replace are identical",
+                i + 1,
+                label
+            ));
         }
-
-        let path = Path::new(path_str);
-        let contents = fs::read_to_string(path)
-            .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
-
-        let count = contents.matches(search).count();
+        let count = current.matches(search.as_str()).count();
         if count == 0 {
             return Err(anyhow::anyhow!(
-                "Search string not found in {}",
-                path.display()
+                "Edit {} in {}: search string not found",
+                i + 1,
+                label
             ));
         }
         if count > 1 {
             return Err(anyhow::anyhow!(
-                "Search string found {} times in {}. Provide a longer/more specific search string to uniquely identify the location.",
-                count,
-                path.display()
+                "Edit {} in {}: search string found {} times. Provide a longer/more specific search string.",
+                i + 1,
+                label,
+                count
             ));
         }
-
-        let updated = contents.replacen(search, replace, 1);
-
-        fs::write(path, &updated)
-            .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", path.display(), e))?;
-
-        Ok(format!("Replaced 1 occurrence in {}", path.display()))
+        current = current.replacen(search.as_str(), replace.as_str(), 1);
     }
+
+    let original = fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
+    Ok((original, current))
 }
 
 /// Preview multiple edits to the same file as a single combined diff.
@@ -150,40 +176,10 @@ pub fn preview_batched(path: &str, edits: &[(String, String)]) -> anyhow::Result
         return Err(anyhow::anyhow!("missing 'path' argument"));
     }
     let file_path = Path::new(path);
-    let original = fs::read_to_string(file_path)
-        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file_path.display(), e))?;
+    let (original, updated) = validate_and_apply_batched(file_path, edits, &file_path.display().to_string())?;
 
-    let mut current = original.clone();
-    for (i, (search, replace)) in edits.iter().enumerate() {
-        if search == replace {
-            return Err(anyhow::anyhow!(
-                "Edit {} in {}: search and replace are identical",
-                i + 1,
-                file_path.display()
-            ));
-        }
-        let count = current.matches(search.as_str()).count();
-        if count == 0 {
-            return Err(anyhow::anyhow!(
-                "Edit {} in {}: search string not found",
-                i + 1,
-                file_path.display()
-            ));
-        }
-        if count > 1 {
-            return Err(anyhow::anyhow!(
-                "Edit {} in {}: search string found {} times. Provide a longer/more specific search string.",
-                i + 1,
-                file_path.display(),
-                count
-            ));
-        }
-        current = current.replacen(search.as_str(), replace.as_str(), 1);
-    }
-
-    let diff = make_unified_diff(path, &original, &current);
+    let diff = make_unified_diff(path, &original, &updated);
     let summary = format!("{} edit(s) to {}", edits.len(), file_path.display());
-
     Ok(format!("{}\n{}", diff, summary))
 }
 
@@ -194,38 +190,9 @@ pub fn execute_batched(path: &str, edits: &[(String, String)]) -> anyhow::Result
         return Err(anyhow::anyhow!("missing 'path' argument"));
     }
     let file_path = Path::new(path);
-    let original = fs::read_to_string(file_path)
-        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file_path.display(), e))?;
+    let (_original, updated) = validate_and_apply_batched(file_path, edits, &file_path.display().to_string())?;
 
-    let mut current = original;
-    for (i, (search, replace)) in edits.iter().enumerate() {
-        if search == replace {
-            return Err(anyhow::anyhow!(
-                "Edit {} in {}: search and replace are identical",
-                i + 1,
-                file_path.display()
-            ));
-        }
-        let count = current.matches(search.as_str()).count();
-        if count == 0 {
-            return Err(anyhow::anyhow!(
-                "Edit {} in {}: search string not found",
-                i + 1,
-                file_path.display()
-            ));
-        }
-        if count > 1 {
-            return Err(anyhow::anyhow!(
-                "Edit {} in {}: search string found {} times. Provide a longer/more specific search string.",
-                i + 1,
-                file_path.display(),
-                count
-            ));
-        }
-        current = current.replacen(search.as_str(), replace.as_str(), 1);
-    }
-
-    fs::write(file_path, &current)
+    fs::write(file_path, &updated)
         .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file_path.display(), e))?;
 
     Ok(format!(
@@ -393,7 +360,6 @@ mod tests {
             ],
         );
         assert!(result.is_err());
-        // File should not have been modified (first edit was not written)
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello world\n");
     }
 }

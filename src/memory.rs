@@ -43,16 +43,34 @@ impl MemoryManager {
         }
     }
 
-    pub fn read_agent_memory(&self) -> String {
-        Self::ensure_file(&self.agent_path, "# Agent Memory");
-        let content = std::fs::read_to_string(&self.agent_path).unwrap_or_default();
+    fn read_mem_file(&self, path: &PathBuf, header: &str) -> String {
+        Self::ensure_file(path, header);
+        let content = std::fs::read_to_string(path).unwrap_or_default();
         self.truncate(&content)
     }
 
+    fn write_mem_file(&self, path: &PathBuf, header: &str, content: &str) {
+        Self::ensure_file(path, header);
+        let truncated = self.truncate(content);
+        std::fs::write(path, truncated).ok();
+    }
+
+    fn append_mem_file(&self, path: &PathBuf, header: &str, content: &str) {
+        Self::ensure_file(path, header);
+        let existing = std::fs::read_to_string(path).unwrap_or_default();
+        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let entry = format!("\n## {}\n{}\n", date, content);
+        let updated = format!("{}\n{}", existing.trim_end(), entry);
+        let truncated = self.truncate(&updated);
+        std::fs::write(path, truncated).ok();
+    }
+
+    pub fn read_agent_memory(&self) -> String {
+        self.read_mem_file(&self.agent_path, "# Agent Memory")
+    }
+
     pub fn read_user_profile(&self) -> String {
-        Self::ensure_file(&self.profile_path, "# User Profile");
-        let content = std::fs::read_to_string(&self.profile_path).unwrap_or_default();
-        self.truncate(&content)
+        self.read_mem_file(&self.profile_path, "# User Profile")
     }
 
     pub fn read_soul(&self) -> String {
@@ -66,35 +84,19 @@ impl MemoryManager {
     }
 
     pub fn write_agent_memory(&self, content: &str) {
-        Self::ensure_file(&self.agent_path, "# Agent Memory");
-        let truncated = self.truncate(content);
-        std::fs::write(&self.agent_path, truncated).ok();
+        self.write_mem_file(&self.agent_path, "# Agent Memory", content)
     }
 
     pub fn append_agent_memory(&self, content: &str) {
-        Self::ensure_file(&self.agent_path, "# Agent Memory");
-        let existing = std::fs::read_to_string(&self.agent_path).unwrap_or_default();
-        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let entry = format!("\n## {}\n{}\n", date, content);
-        let updated = format!("{}\n{}", existing.trim_end(), entry);
-        let truncated = self.truncate(&updated);
-        std::fs::write(&self.agent_path, truncated).ok();
+        self.append_mem_file(&self.agent_path, "# Agent Memory", content)
     }
 
     pub fn write_user_profile(&self, content: &str) {
-        Self::ensure_file(&self.profile_path, "# User Profile");
-        let truncated = self.truncate(content);
-        std::fs::write(&self.profile_path, truncated).ok();
+        self.write_mem_file(&self.profile_path, "# User Profile", content)
     }
 
     pub fn append_user_profile(&self, content: &str) {
-        Self::ensure_file(&self.profile_path, "# User Profile");
-        let existing = std::fs::read_to_string(&self.profile_path).unwrap_or_default();
-        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let entry = format!("\n## {}\n{}\n", date, content);
-        let updated = format!("{}\n{}", existing.trim_end(), entry);
-        let truncated = self.truncate(&updated);
-        std::fs::write(&self.profile_path, truncated).ok();
+        self.append_mem_file(&self.profile_path, "# User Profile", content)
     }
 
     pub fn write_soul(&self, content: &str) {

@@ -66,10 +66,6 @@ impl History {
         &self.messages
     }
 
-    pub fn pop_last(&mut self) {
-        self.messages.pop();
-    }
-
     pub fn clear(&mut self) {
         self.messages.clear();
     }

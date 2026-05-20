@@ -1,6 +1,8 @@
+mod cards;
+mod text;
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
 
 use super::state::AppState;
@@ -8,6 +10,9 @@ use super::theme::{
     ASSISTANT_GLYPH, CARD_BOT, CARD_MID, CARD_TOP, RAIL, THINKING_RAIL, TOOL_GLYPH, USER_GLYPH,
 };
 use super::types::{ClickRange, DisplayMessage};
+
+use cards::render_inline_tool;
+use text::{apply_line_selection, wrap_str};
 
 const TOGGLE_LABEL: &str = "[toggle]";
 
@@ -241,7 +246,7 @@ fn render_glyph_lines(
     let glyph_style = Style::default().fg(glyph_fg).add_modifier(Modifier::BOLD);
     let rail_style = Style::default().fg(rail_fg);
     let body_style = Style::default().fg(body_fg);
-    let glyph_prefix_w = UnicodeWidthStr::width(glyph) + 1; // glyph + " "
+    let glyph_prefix_w = UnicodeWidthStr::width(glyph) + 1;
     let rail_prefix_w = UnicodeWidthStr::width(RAIL);
 
     for (i, line) in content.lines().enumerate() {
@@ -320,102 +325,6 @@ fn render_assistant_message(
     );
 }
 
-fn render_inline_tool(
-    lines: &mut Vec<Line>,
-    args_display: &str,
-    result: Option<&str>,
-    collapsed: bool,
-    theme: &super::theme::Theme,
-    width: usize,
-) {
-    let panel_bg = theme.panel_bg;
-    let tool_style = Style::default().fg(theme.tool).bg(panel_bg);
-    let rail_style = Style::default().fg(theme.rail).bg(panel_bg);
-    let body_style = Style::default().fg(theme.input).bg(panel_bg);
-
-    lines.push(card_line(CARD_TOP, args_display, tool_style, width));
-
-    if let Some(result) = result {
-        if collapsed {
-            let first_line = result.lines().next().unwrap_or("");
-            let truncated: String = first_line.chars().take(80).collect();
-            let extra = result.lines().count().saturating_sub(1);
-            lines.push(trailing_pad_line(
-                CARD_BOT,
-                vec![
-                    Span::styled(truncated, Style::default().fg(theme.muted).bg(panel_bg)),
-                    Span::styled(
-                        format!(" +{} lines", extra),
-                        Style::default()
-                            .fg(theme.muted)
-                            .bg(panel_bg)
-                            .add_modifier(Modifier::ITALIC),
-                    ),
-                ],
-                rail_style,
-                width,
-            ));
-        } else {
-            let all_lines: Vec<&str> = result.lines().collect();
-            for (i, line) in all_lines.iter().enumerate() {
-                let prefix = if i == all_lines.len() - 1 {
-                    CARD_BOT
-                } else {
-                    CARD_MID
-                };
-                lines.push(trailing_pad_line(
-                    prefix,
-                    vec![Span::styled(line.to_string(), body_style)],
-                    rail_style,
-                    width,
-                ));
-            }
-        }
-    } else {
-        lines.push(trailing_pad_line(
-            CARD_BOT,
-            vec![Span::styled(
-                "running\u{2026}".to_string(),
-                Style::default()
-                    .fg(theme.muted)
-                    .bg(panel_bg)
-                    .add_modifier(Modifier::ITALIC),
-            )],
-            rail_style,
-            width,
-        ));
-    }
-}
-
-fn card_line(prefix: &str, content: &str, style: Style, width: usize) -> Line<'static> {
-    let prefix_w = UnicodeWidthStr::width(prefix);
-    let content_w = UnicodeWidthStr::width(content);
-    let pad_w = width.saturating_sub(prefix_w + content_w);
-    Line::from(vec![
-        Span::styled(prefix.to_string(), style),
-        Span::styled(content.to_string(), style),
-        Span::styled(" ".repeat(pad_w), style),
-    ])
-}
-
-fn trailing_pad_line(
-    prefix: &str,
-    content_spans: Vec<Span<'static>>,
-    rail_style: Style,
-    width: usize,
-) -> Line<'static> {
-    let prefix_w = UnicodeWidthStr::width(prefix);
-    let content_w: usize = content_spans
-        .iter()
-        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
-        .sum();
-    let pad_w = width.saturating_sub(prefix_w + content_w);
-    let mut spans = vec![Span::styled(prefix.to_string(), rail_style)];
-    spans.extend(content_spans);
-    spans.push(Span::styled(" ".repeat(pad_w), rail_style));
-    Line::from(spans)
-}
-
 fn render_system_message(
     lines: &mut Vec<Line>,
     content: &str,
@@ -473,80 +382,4 @@ fn render_system_message(
             }
         }
     }
-}
-
-fn wrap_str(s: &str, max_w: usize) -> Vec<String> {
-    if max_w == 0 {
-        return vec![s.to_string()];
-    }
-    let mut result = Vec::new();
-    let mut w = 0;
-    let mut last = 0;
-    for (i, c) in s.char_indices() {
-        let cw = c.width().unwrap_or(0);
-        if w + cw > max_w {
-            result.push(s[last..i].to_string());
-            last = i;
-            w = cw;
-        } else {
-            w += cw;
-        }
-    }
-    if last < s.len() {
-        result.push(s[last..].to_string());
-    }
-    if result.is_empty() {
-        result.push(String::new());
-    }
-    result
-}
-
-fn split_at_display_width(s: &str, width: usize) -> (&str, &str) {
-    let mut w = 0;
-    for (i, c) in s.char_indices() {
-        if w >= width {
-            return (&s[..i], &s[i..]);
-        }
-        w += c.width().unwrap_or(0);
-    }
-    (s, "")
-}
-
-fn apply_line_selection(line: &mut Line, sel_start: usize, sel_end: usize, bg: Color) {
-    let mut new_spans = Vec::new();
-    let mut col = 0;
-
-    for span in line.spans.drain(..) {
-        let span_width = UnicodeWidthStr::width(span.content.as_ref());
-        let span_end = col + span_width;
-
-        if span_end <= sel_start || col >= sel_end {
-            new_spans.push(span);
-            col = span_end;
-            continue;
-        }
-
-        let text: &str = span.content.as_ref();
-        let style = span.style;
-
-        let before_w = sel_start.saturating_sub(col);
-        let selected_w = sel_end.min(span_end).saturating_sub(sel_start.max(col));
-
-        let (before, rest) = split_at_display_width(text, before_w);
-        let (selected, after) = split_at_display_width(rest, selected_w);
-
-        if !before.is_empty() {
-            new_spans.push(Span::styled(before.to_string(), style));
-        }
-        if !selected.is_empty() {
-            new_spans.push(Span::styled(selected.to_string(), style.bg(bg)));
-        }
-        if !after.is_empty() {
-            new_spans.push(Span::styled(after.to_string(), style));
-        }
-
-        col = span_end;
-    }
-
-    line.spans = new_spans;
 }
