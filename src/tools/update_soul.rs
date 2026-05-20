@@ -26,6 +26,14 @@ impl Tool for UpdateSoulTool {
         "Update your personality and behavioral guidelines (SOUL.md). This changes how you behave in future interactions."
     }
 
+    fn default_rules(&self) -> Vec<crate::permission::TargetRule> {
+        use crate::permission::{PermissionAction, TargetRule};
+        vec![TargetRule {
+            target: "*".to_string(),
+            action: PermissionAction::Ask,
+        }]
+    }
+
     fn parameters(&self) -> Value {
         json!({
             "type": "object",

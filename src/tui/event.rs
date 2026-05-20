@@ -59,6 +59,7 @@ impl AppState {
             AppEvent::ApprovalPending {
                 call_id,
                 tool_name,
+                tool_target,
                 preview,
             } => {
                 let first_line = preview.lines().next().unwrap_or("");
@@ -93,6 +94,7 @@ impl AppState {
                     call_id.clone(),
                     tool_name.clone(),
                     tool_label,
+                    tool_target.clone(),
                 ));
             }
             AppEvent::ToolRejected { call_id, feedback } => {

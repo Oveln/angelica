@@ -39,8 +39,16 @@ impl Tool for EditFileTool {
         })
     }
 
-    fn requires_approval(&self) -> bool {
-        true
+    fn permission_target(&self, args: &Value) -> Option<String> {
+        args["path"].as_str().map(String::from)
+    }
+
+    fn default_rules(&self) -> Vec<crate::permission::TargetRule> {
+        use crate::permission::{PermissionAction, TargetRule};
+        vec![TargetRule {
+            target: "*".to_string(),
+            action: PermissionAction::Ask,
+        }]
     }
 
     fn preview(&self, args: Value) -> anyhow::Result<Option<String>> {
@@ -91,7 +99,11 @@ fn validate_single_args(args: &Value) -> anyhow::Result<ValidatedSingle> {
     })
 }
 
-fn validate_and_apply_one(path: &Path, search: &str, replace: &str) -> anyhow::Result<(String, String)> {
+fn validate_and_apply_one(
+    path: &Path,
+    search: &str,
+    replace: &str,
+) -> anyhow::Result<(String, String)> {
     if search == replace {
         return Err(anyhow::anyhow!("search and replace are identical"));
     }
@@ -176,7 +188,8 @@ pub fn preview_batched(path: &str, edits: &[(String, String)]) -> anyhow::Result
         return Err(anyhow::anyhow!("missing 'path' argument"));
     }
     let file_path = Path::new(path);
-    let (original, updated) = validate_and_apply_batched(file_path, edits, &file_path.display().to_string())?;
+    let (original, updated) =
+        validate_and_apply_batched(file_path, edits, &file_path.display().to_string())?;
 
     let diff = make_unified_diff(path, &original, &updated);
     let summary = format!("{} edit(s) to {}", edits.len(), file_path.display());
@@ -190,7 +203,8 @@ pub fn execute_batched(path: &str, edits: &[(String, String)]) -> anyhow::Result
         return Err(anyhow::anyhow!("missing 'path' argument"));
     }
     let file_path = Path::new(path);
-    let (_original, updated) = validate_and_apply_batched(file_path, edits, &file_path.display().to_string())?;
+    let (_original, updated) =
+        validate_and_apply_batched(file_path, edits, &file_path.display().to_string())?;
 
     fs::write(file_path, &updated)
         .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file_path.display(), e))?;

@@ -19,16 +19,23 @@ pub struct ApprovalState {
     pub tool_call_id: String,
     pub tool_name: String,
     pub tool_label: String,
+    pub tool_target: Option<String>,
     pub selected: ApprovalChoice,
     pub feedback: InputBuffer,
 }
 
 impl ApprovalState {
-    pub fn new(tool_call_id: String, tool_name: String, tool_label: String) -> Self {
+    pub fn new(
+        tool_call_id: String,
+        tool_name: String,
+        tool_label: String,
+        tool_target: Option<String>,
+    ) -> Self {
         Self {
             tool_call_id,
             tool_name,
             tool_label,
+            tool_target,
             selected: ApprovalChoice::Allow,
             feedback: InputBuffer::new(),
         }
@@ -38,6 +45,11 @@ impl ApprovalState {
 enum ApprovalAction {
     None,
     Approve,
+    ApproveAlways {
+        tool: String,
+        target: String,
+        persist: bool,
+    },
     Reject(Option<String>),
 }
 
@@ -93,6 +105,22 @@ pub async fn handle_key(
             }
             KeyCode::Enter => match a.selected {
                 ApprovalChoice::Allow => action = ApprovalAction::Approve,
+                ApprovalChoice::AlwaysSession => {
+                    let target = a.tool_target.clone().unwrap_or_else(|| "*".to_string());
+                    action = ApprovalAction::ApproveAlways {
+                        tool: a.tool_name.clone(),
+                        target,
+                        persist: false,
+                    }
+                }
+                ApprovalChoice::AlwaysPersist => {
+                    let target = a.tool_target.clone().unwrap_or_else(|| "*".to_string());
+                    action = ApprovalAction::ApproveAlways {
+                        tool: a.tool_name.clone(),
+                        target,
+                        persist: true,
+                    }
+                }
                 ApprovalChoice::Reject => action = ApprovalAction::Reject(None),
                 ApprovalChoice::EditFeedback if editing => {
                     action = ApprovalAction::Reject(Some(a.feedback.trim().to_string()));
@@ -102,6 +130,22 @@ pub async fn handle_key(
                 }
             },
             KeyCode::Char('y') if !editing => action = ApprovalAction::Approve,
+            KeyCode::Char('a') if !editing => {
+                let target = a.tool_target.clone().unwrap_or_else(|| "*".to_string());
+                action = ApprovalAction::ApproveAlways {
+                    tool: a.tool_name.clone(),
+                    target,
+                    persist: false,
+                }
+            }
+            KeyCode::Char('p') if !editing => {
+                let target = a.tool_target.clone().unwrap_or_else(|| "*".to_string());
+                action = ApprovalAction::ApproveAlways {
+                    tool: a.tool_name.clone(),
+                    target,
+                    persist: true,
+                }
+            }
             KeyCode::Char('n') if !editing => action = ApprovalAction::Reject(None),
             KeyCode::Char(c) if editing => {
                 a.feedback.insert(c);
@@ -119,6 +163,20 @@ pub async fn handle_key(
             state.mode = AppMode::Chat;
             let _ = tx.send(UserAction::ApprovePending).await;
         }
+        ApprovalAction::ApproveAlways {
+            tool,
+            target,
+            persist,
+        } => {
+            state.mode = AppMode::Chat;
+            let _ = tx
+                .send(UserAction::ApproveAlways {
+                    tool,
+                    target,
+                    persist,
+                })
+                .await;
+        }
         ApprovalAction::Reject(feedback) => {
             state.mode = AppMode::Chat;
             let _ = tx.send(UserAction::RejectTool { feedback }).await;
@@ -128,7 +186,9 @@ pub async fn handle_key(
 
 fn next_choice(current: ApprovalChoice) -> ApprovalChoice {
     match current {
-        ApprovalChoice::Allow => ApprovalChoice::Reject,
+        ApprovalChoice::Allow => ApprovalChoice::AlwaysSession,
+        ApprovalChoice::AlwaysSession => ApprovalChoice::AlwaysPersist,
+        ApprovalChoice::AlwaysPersist => ApprovalChoice::Reject,
         ApprovalChoice::Reject => ApprovalChoice::EditFeedback,
         ApprovalChoice::EditFeedback => ApprovalChoice::Allow,
     }
@@ -137,7 +197,9 @@ fn next_choice(current: ApprovalChoice) -> ApprovalChoice {
 fn prev_choice(current: ApprovalChoice) -> ApprovalChoice {
     match current {
         ApprovalChoice::Allow => ApprovalChoice::EditFeedback,
-        ApprovalChoice::Reject => ApprovalChoice::Allow,
+        ApprovalChoice::AlwaysSession => ApprovalChoice::Allow,
+        ApprovalChoice::AlwaysPersist => ApprovalChoice::AlwaysSession,
+        ApprovalChoice::Reject => ApprovalChoice::AlwaysPersist,
         ApprovalChoice::EditFeedback => ApprovalChoice::Reject,
     }
 }
@@ -176,6 +238,8 @@ pub fn draw_choices(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) 
             let sel = choice == selected;
             let hint = match choice {
                 ApprovalChoice::Allow => "y",
+                ApprovalChoice::AlwaysSession => "a",
+                ApprovalChoice::AlwaysPersist => "p",
                 ApprovalChoice::Reject => "n",
                 ApprovalChoice::EditFeedback => "e",
             };
@@ -191,7 +255,7 @@ pub fn draw_choices(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) 
     let hint_text = if editing {
         "enter confirm  \u{2502}  esc back"
     } else {
-        "\u{2194} select  \u{2502}  y/n confirm"
+        "\u{2194} select  \u{2502}  y/a/p/n confirm"
     };
     let hint_str = format!("  {}", hint_text);
     let hint_w = UnicodeWidthStr::width(hint_str.as_str());

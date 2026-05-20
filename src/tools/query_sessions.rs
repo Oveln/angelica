@@ -44,6 +44,14 @@ impl Tool for QuerySessionsTool {
         })
     }
 
+    fn default_rules(&self) -> Vec<crate::permission::TargetRule> {
+        use crate::permission::{PermissionAction, TargetRule};
+        vec![TargetRule {
+            target: "*".to_string(),
+            action: PermissionAction::Allow,
+        }]
+    }
+
     async fn execute(&self, args: Value) -> anyhow::Result<String> {
         let keyword = args["keyword"]
             .as_str()

@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 
-use super::events::{AppEvent, UserAction};
 use super::Agent;
+use super::events::{AppEvent, UserAction};
 use crate::config::Config;
 
 pub async fn run(
@@ -10,6 +10,8 @@ pub async fn run(
     event_tx: mpsc::Sender<AppEvent>,
 ) {
     let mut agent = Agent::new(config);
+
+    agent.permissions.load_approved(&agent.approved_path);
 
     if let Err(e) = agent.initialize().await {
         let _ = event_tx
@@ -40,6 +42,21 @@ async fn run_loop(
                 agent.save_if_dirty().await;
             }
             UserAction::ApprovePending => {
+                let _ = agent.approve_and_step(event_tx).await;
+                agent.save_if_dirty().await;
+            }
+            UserAction::ApproveAlways {
+                tool,
+                target,
+                persist,
+            } => {
+                tracing::info!(
+                    "ApproveAlways: tool={}, target={}, persist={}",
+                    tool,
+                    target,
+                    persist
+                );
+                agent.approve_permission(&tool, target, persist);
                 let _ = agent.approve_and_step(event_tx).await;
                 agent.save_if_dirty().await;
             }

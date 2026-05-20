@@ -27,6 +27,7 @@ pub enum AppEvent {
     ApprovalPending {
         call_id: String,
         tool_name: String,
+        tool_target: Option<String>,
         preview: String,
     },
     ToolRejected {
@@ -48,10 +49,21 @@ pub enum AppEvent {
 
 #[derive(Debug, Clone)]
 pub enum UserAction {
-    SendMessage { content: String },
+    SendMessage {
+        content: String,
+    },
     ApprovePending,
-    RejectTool { feedback: Option<String> },
+    ApproveAlways {
+        tool: String,
+        target: String,
+        persist: bool,
+    },
+    RejectTool {
+        feedback: Option<String>,
+    },
     ClearHistory,
-    ResumeSession { session_id: String },
+    ResumeSession {
+        session_id: String,
+    },
     Quit,
 }

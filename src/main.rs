@@ -12,12 +12,16 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .init();
+    let log_file = std::fs::File::create("angelica.log").ok();
+    let builder = tracing_subscriber::fmt().with_env_filter(
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+    );
+    if let Some(file) = log_file {
+        builder.with_writer(file).with_ansi(false).init();
+    } else {
+        builder.init();
+    }
 
     let cli = Cli::parse();
 

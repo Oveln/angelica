@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use crate::llm::types::ToolSpec;
 use crate::memory::MemoryManager;
+use crate::permission::TargetRule;
 use crate::session::SessionManager;
 
 #[async_trait]
@@ -23,9 +24,6 @@ pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn parameters(&self) -> Value;
-    fn requires_approval(&self) -> bool {
-        false
-    }
 
     fn preview(&self, _args: Value) -> anyhow::Result<Option<String>> {
         Ok(None)
@@ -36,6 +34,14 @@ pub trait Tool: Send + Sync {
     }
 
     async fn execute(&self, args: Value) -> anyhow::Result<String>;
+
+    fn permission_target(&self, _args: &Value) -> Option<String> {
+        None
+    }
+
+    fn default_rules(&self) -> Vec<TargetRule> {
+        vec![]
+    }
 }
 
 pub struct ToolRegistry {
@@ -79,10 +85,11 @@ impl ToolRegistry {
         self.tools.values().map(|t| t.to_spec()).collect()
     }
 
-    pub fn is_auto_execute(&self, name: &str) -> bool {
+    pub fn builtin_rules(&self) -> Vec<(String, Vec<TargetRule>)> {
         self.tools
-            .get(name)
-            .map_or(false, |t| !t.requires_approval())
+            .iter()
+            .map(|(name, tool)| (name.clone(), tool.default_rules()))
+            .collect()
     }
 }
 

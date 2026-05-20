@@ -1,8 +1,9 @@
 use tokio::sync::mpsc;
 
+use super::Agent;
 use super::events::AppEvent;
 use super::group::{BatchedEdit, PendingApproval, ToolCallGroup, group_tool_calls};
-use super::Agent;
+use crate::permission::PermissionAction;
 
 enum ProcessOutcome {
     Continue,
@@ -33,119 +34,210 @@ impl Agent {
             ToolCallGroup::Single { tc } => {
                 let name = tc.function.name.clone();
                 let tc_id = tc.id.clone();
-                let args: serde_json::Value =
-                    match serde_json::from_str(&tc.function.arguments) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            let msg = format!("Invalid JSON in tool call arguments: {}", e);
-                            self.history.record_tool_result(tc_id.clone(), msg.clone());
-                            let _ = event_tx
-                                .send(AppEvent::ToolResult {
-                                    call_id: tc_id,
-                                    name: name.clone(),
-                                    result: msg,
-                                })
-                                .await;
-                            return ProcessOutcome::Continue;
-                        }
-                    };
+                let args: serde_json::Value = match serde_json::from_str(&tc.function.arguments) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let msg = format!("Invalid JSON in tool call arguments: {}", e);
+                        self.history.record_tool_result(tc_id.clone(), msg.clone());
+                        let _ = event_tx
+                            .send(AppEvent::ToolResult {
+                                call_id: tc_id,
+                                name: name.clone(),
+                                result: msg,
+                            })
+                            .await;
+                        return ProcessOutcome::Continue;
+                    }
+                };
 
-                if self.tools.is_auto_execute(&name) {
-                    let _ = event_tx
-                        .send(AppEvent::ToolCalling {
-                            call_id: tc.id.clone(),
-                            name: name.clone(),
-                            arguments: tc.function.arguments.clone(),
-                        })
-                        .await;
-                    let result = self.execute_tool(&name, args).await;
-                    let _ = event_tx
-                        .send(AppEvent::ToolResult {
-                            call_id: tc.id.clone(),
-                            name: name.clone(),
-                            result: result.clone(),
-                        })
-                        .await;
-                    self.history.record_tool_result(tc.id, result);
-                    ProcessOutcome::Continue
-                } else {
-                    let preview = self.make_approval_preview(&name, &args, None);
+                let target = self
+                    .tools
+                    .get(&name)
+                    .and_then(|t| t.permission_target(&args));
 
-                    let tc_id = tc.id.clone();
-                    let _ = event_tx
-                        .send(AppEvent::ApprovalPending {
-                            call_id: tc_id.clone(),
-                            tool_name: name.clone(),
-                            preview,
-                        })
-                        .await;
+                tracing::info!("evaluate: tool={}, target={:?}", name, target);
+                let action = self.permissions.evaluate(&name, target.as_deref());
+                tracing::info!("evaluate result: {:?}", action);
+                match action {
+                    PermissionAction::Allow => {
+                        let _ = event_tx
+                            .send(AppEvent::ToolCalling {
+                                call_id: tc.id.clone(),
+                                name: name.clone(),
+                                arguments: tc.function.arguments.clone(),
+                            })
+                            .await;
+                        let result = self.execute_tool(&name, args).await;
+                        let _ = event_tx
+                            .send(AppEvent::ToolResult {
+                                call_id: tc.id.clone(),
+                                name: name.clone(),
+                                result: result.clone(),
+                            })
+                            .await;
+                        self.history.record_tool_result(tc.id, result);
+                        ProcessOutcome::Continue
+                    }
+                    PermissionAction::Deny => {
+                        let msg = format!("Tool '{}' denied by permission policy.", name);
+                        self.history.record_tool_result(tc.id.clone(), msg.clone());
+                        let _ = event_tx
+                            .send(AppEvent::ToolResult {
+                                call_id: tc.id,
+                                name: name,
+                                result: msg,
+                            })
+                            .await;
+                        ProcessOutcome::Continue
+                    }
+                    PermissionAction::Ask => {
+                        let preview = self.make_approval_preview(&name, &args, None);
 
-                    self.history
-                        .record_tool_result(tc_id, "Pending user approval...".to_string());
-                    self.pending_approval = Some(PendingApproval {
-                        tc_ids: vec![tc.id],
-                        tool_name: name,
-                        args,
-                        display_args: tc.function.arguments.clone(),
-                        batched_edits: None,
-                    });
+                        let tc_id = tc.id.clone();
+                        let _ = event_tx
+                            .send(AppEvent::ApprovalPending {
+                                call_id: tc_id.clone(),
+                                tool_name: name.clone(),
+                                tool_target: target.clone(),
+                                preview,
+                            })
+                            .await;
 
-                    ProcessOutcome::NeedApproval
+                        self.history
+                            .record_tool_result(tc_id, "Pending user approval...".to_string());
+                        self.pending_approval = Some(PendingApproval {
+                            tc_ids: vec![tc.id],
+                            tool_name: name,
+                            args,
+                            display_args: tc.function.arguments.clone(),
+                            batched_edits: None,
+                        });
+
+                        ProcessOutcome::NeedApproval
+                    }
                 }
             }
             ToolCallGroup::BatchedEdits { path, edits } => {
-                let count = edits.len();
-                let first_id = edits.first().map(|e| e.tc_id.clone()).unwrap_or_default();
-                let display_args = serde_json::to_string(&serde_json::json!({
-                    "path": path,
-                    "count": count,
-                }))
-                .unwrap_or_default();
+                tracing::info!(
+                    "evaluate: tool=edit_file (batched), target={:?}",
+                    Some(&path)
+                );
+                let action = self.permissions.evaluate("edit_file", Some(&path));
+                tracing::info!("evaluate result: {:?}", action);
 
-                let searches_replaces: Vec<(String, String)> = edits
-                    .iter()
-                    .map(|e| (e.search.clone(), e.replace.clone()))
-                    .collect();
+                match action {
+                    PermissionAction::Allow => {
+                        let searches_replaces: Vec<(String, String)> = edits
+                            .iter()
+                            .map(|e| (e.search.clone(), e.replace.clone()))
+                            .collect();
+                        let display_args = serde_json::to_string(&serde_json::json!({
+                            "path": path,
+                            "count": edits.len(),
+                        }))
+                        .unwrap_or_default();
+                        for e in &edits {
+                            let _ = event_tx
+                                .send(AppEvent::ToolCalling {
+                                    call_id: e.tc_id.clone(),
+                                    name: "edit_file".to_string(),
+                                    arguments: display_args.clone(),
+                                })
+                                .await;
+                        }
+                        let result = match crate::tools::edit_file::execute_batched(
+                            &path,
+                            &searches_replaces,
+                        ) {
+                            Ok(summary) => summary,
+                            Err(e) => format!("Error: {}", e),
+                        };
+                        for e in &edits {
+                            self.history
+                                .record_tool_result(e.tc_id.clone(), result.clone());
+                            let _ = event_tx
+                                .send(AppEvent::ToolResult {
+                                    call_id: e.tc_id.clone(),
+                                    name: "edit_file".to_string(),
+                                    result: result.clone(),
+                                })
+                                .await;
+                        }
+                        ProcessOutcome::Continue
+                    }
+                    PermissionAction::Deny => {
+                        let msg = "Tool 'edit_file' denied by permission policy.".to_string();
+                        for e in &edits {
+                            self.history
+                                .record_tool_result(e.tc_id.clone(), msg.clone());
+                            let _ = event_tx
+                                .send(AppEvent::ToolResult {
+                                    call_id: e.tc_id.clone(),
+                                    name: "edit_file".to_string(),
+                                    result: msg.clone(),
+                                })
+                                .await;
+                        }
+                        ProcessOutcome::Continue
+                    }
+                    PermissionAction::Ask => {
+                        let count = edits.len();
+                        let first_id = edits.first().map(|e| e.tc_id.clone()).unwrap_or_default();
+                        let display_args = serde_json::to_string(&serde_json::json!({
+                            "path": path,
+                            "count": count,
+                        }))
+                        .unwrap_or_default();
 
-                let preview =
-                    match crate::tools::edit_file::preview_batched(&path, &searches_replaces) {
-                        Ok(p) => p,
-                        Err(e) => format!("Preview failed: {}", e),
-                    };
+                        let batched: Vec<BatchedEdit> = edits
+                            .iter()
+                            .map(|e| BatchedEdit {
+                                tc_id: e.tc_id.clone(),
+                                search: e.search.clone(),
+                                replace: e.replace.clone(),
+                            })
+                            .collect();
 
-                for e in &edits {
-                    self.history.record_tool_result(
-                        e.tc_id.clone(),
-                        "Pending user approval...".to_string(),
-                    );
+                        let searches_replaces: Vec<(String, String)> = batched
+                            .iter()
+                            .map(|b| (b.search.clone(), b.replace.clone()))
+                            .collect();
+
+                        let preview = match crate::tools::edit_file::preview_batched(
+                            &path,
+                            &searches_replaces,
+                        ) {
+                            Ok(p) => p,
+                            Err(e) => format!("Preview failed: {}", e),
+                        };
+
+                        for e in &edits {
+                            self.history.record_tool_result(
+                                e.tc_id.clone(),
+                                "Pending user approval...".to_string(),
+                            );
+                        }
+
+                        self.pending_approval = Some(PendingApproval {
+                            tc_ids: batched.iter().map(|b| b.tc_id.clone()).collect(),
+                            tool_name: "edit_file".to_string(),
+                            args: serde_json::json!({"path": path}),
+                            display_args,
+                            batched_edits: Some(batched),
+                        });
+
+                        let _ = event_tx
+                            .send(AppEvent::ApprovalPending {
+                                call_id: first_id,
+                                tool_name: "edit_file".to_string(),
+                                tool_target: Some(path),
+                                preview,
+                            })
+                            .await;
+
+                        ProcessOutcome::NeedApproval
+                    }
                 }
-
-                let batched: Vec<BatchedEdit> = edits
-                    .iter()
-                    .map(|e| BatchedEdit {
-                        tc_id: e.tc_id.clone(),
-                        search: e.search.clone(),
-                        replace: e.replace.clone(),
-                    })
-                    .collect();
-
-                self.pending_approval = Some(PendingApproval {
-                    tc_ids: batched.iter().map(|b| b.tc_id.clone()).collect(),
-                    tool_name: "edit_file".to_string(),
-                    args: serde_json::json!({"path": path}),
-                    display_args,
-                    batched_edits: Some(batched),
-                });
-
-                let _ = event_tx
-                    .send(AppEvent::ApprovalPending {
-                        call_id: first_id,
-                        tool_name: "edit_file".to_string(),
-                        preview,
-                    })
-                    .await;
-
-                ProcessOutcome::NeedApproval
             }
         }
     }

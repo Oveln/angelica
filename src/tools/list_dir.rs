@@ -30,6 +30,18 @@ impl Tool for ListDirTool {
         })
     }
 
+    fn permission_target(&self, args: &Value) -> Option<String> {
+        args["path"].as_str().map(String::from)
+    }
+
+    fn default_rules(&self) -> Vec<crate::permission::TargetRule> {
+        use crate::permission::{PermissionAction, TargetRule};
+        vec![TargetRule {
+            target: "*".to_string(),
+            action: PermissionAction::Allow,
+        }]
+    }
+
     async fn execute(&self, args: Value) -> anyhow::Result<String> {
         let path_str = args["path"].as_str().unwrap_or(".");
         let path = std::path::Path::new(path_str);

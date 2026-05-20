@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use std::path::Path;
 
+use crate::permission::PermissionConfig;
+
 #[derive(Debug, Deserialize)]
 pub struct Config {
     #[serde(default)]
@@ -13,6 +15,8 @@ pub struct Config {
     pub skills: SkillsConfig,
     #[serde(default)]
     pub session: SessionConfig,
+    #[serde(default)]
+    pub permission: PermissionConfig,
 }
 
 impl Config {
@@ -33,6 +37,7 @@ impl Config {
         self.memory.soul_path = Self::absolute_or(base, &self.memory.soul_path);
         self.skills.directory = Self::absolute_or(base, &self.skills.directory);
         self.session.directory = Self::absolute_or(base, &self.session.directory);
+        self.permission.approved_path = Self::absolute_or(base, &self.permission.approved_path);
     }
 
     fn absolute_or(base: &Path, path: &str) -> String {
@@ -53,6 +58,7 @@ impl Default for Config {
             mcp: McpConfig::default(),
             skills: SkillsConfig::default(),
             session: SessionConfig::default(),
+            permission: PermissionConfig::default(),
         }
     }
 }

@@ -26,6 +26,14 @@ impl Tool for UpdateAgentMemoryTool {
         "Update your own memory. Use action='append' to add a new entry, or action='overwrite' to replace the entire memory."
     }
 
+    fn default_rules(&self) -> Vec<crate::permission::TargetRule> {
+        use crate::permission::{PermissionAction, TargetRule};
+        vec![TargetRule {
+            target: "*".to_string(),
+            action: PermissionAction::Ask,
+        }]
+    }
+
     fn parameters(&self) -> Value {
         json!({
             "type": "object",

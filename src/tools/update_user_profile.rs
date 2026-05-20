@@ -26,6 +26,14 @@ impl Tool for UpdateUserProfileTool {
         "Update the user profile/preferences. Use action='overwrite' to replace the profile."
     }
 
+    fn default_rules(&self) -> Vec<crate::permission::TargetRule> {
+        use crate::permission::{PermissionAction, TargetRule};
+        vec![TargetRule {
+            target: "*".to_string(),
+            action: PermissionAction::Ask,
+        }]
+    }
+
     fn parameters(&self) -> Value {
         json!({
             "type": "object",

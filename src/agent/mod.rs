@@ -57,6 +57,7 @@ use crate::config::Config;
 use crate::llm::LlmClient;
 use crate::mcp::McpClientManager;
 use crate::memory::MemoryManager;
+use crate::permission::PermissionEvaluator;
 use crate::session::SessionManager;
 use crate::skills::SkillRegistry;
 use crate::tools::ToolRegistry;
@@ -79,6 +80,8 @@ pub(crate) struct Agent {
     tool_queue: VecDeque<ToolCallGroup>,
     iteration: usize,
     dirty: bool,
+    permissions: PermissionEvaluator,
+    approved_path: std::path::PathBuf,
 }
 
 impl Agent {
@@ -90,6 +93,14 @@ impl Agent {
         skills.discover();
 
         let tools = ToolRegistry::with_defaults(memory.clone(), sessions.clone());
+
+        let builtin = tools.builtin_rules();
+        let approved_path = std::path::Path::new(&config.permission.approved_path).to_path_buf();
+        let permissions = PermissionEvaluator::new(
+            config.permission.default,
+            builtin,
+            config.permission.tools.clone(),
+        );
 
         Self {
             config,
@@ -104,6 +115,8 @@ impl Agent {
             tool_queue: VecDeque::new(),
             iteration: 0,
             dirty: false,
+            permissions,
+            approved_path,
         }
     }
 
@@ -202,6 +215,19 @@ impl Agent {
         if self.dirty {
             let _ = self.save_session().await;
             self.dirty = false;
+        }
+    }
+
+    pub fn approve_permission(&mut self, tool: &str, target: String, persist: bool) {
+        if persist {
+            if let Err(e) = self
+                .permissions
+                .approve_always(tool, target, &self.approved_path)
+            {
+                tracing::warn!("Failed to persist permission rule: {}", e);
+            }
+        } else {
+            self.permissions.approve_session(tool, target);
         }
     }
 }

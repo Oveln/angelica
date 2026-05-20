@@ -3,6 +3,7 @@ pub mod config;
 pub mod llm;
 pub mod mcp;
 pub mod memory;
+pub mod permission;
 pub mod session;
 pub mod skills;
 pub mod tools;

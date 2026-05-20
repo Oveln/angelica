@@ -35,8 +35,16 @@ impl Tool for WriteFileTool {
         })
     }
 
-    fn requires_approval(&self) -> bool {
-        true
+    fn permission_target(&self, args: &Value) -> Option<String> {
+        args["path"].as_str().map(String::from)
+    }
+
+    fn default_rules(&self) -> Vec<crate::permission::TargetRule> {
+        use crate::permission::{PermissionAction, TargetRule};
+        vec![TargetRule {
+            target: "*".to_string(),
+            action: PermissionAction::Ask,
+        }]
     }
 
     fn preview(&self, args: Value) -> anyhow::Result<Option<String>> {

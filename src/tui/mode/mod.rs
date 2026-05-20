@@ -16,13 +16,17 @@ use crate::tui::types::{BUILTIN_COMMANDS, DisplayMessage};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalChoice {
     Allow,
+    AlwaysSession,
+    AlwaysPersist,
     Reject,
     EditFeedback,
 }
 
 impl ApprovalChoice {
-    pub const ALL: [ApprovalChoice; 3] = [
+    pub const ALL: [ApprovalChoice; 5] = [
         ApprovalChoice::Allow,
+        ApprovalChoice::AlwaysSession,
+        ApprovalChoice::AlwaysPersist,
         ApprovalChoice::Reject,
         ApprovalChoice::EditFeedback,
     ];
@@ -30,6 +34,8 @@ impl ApprovalChoice {
     pub fn label(self) -> &'static str {
         match self {
             ApprovalChoice::Allow => "Allow",
+            ApprovalChoice::AlwaysSession => "Always",
+            ApprovalChoice::AlwaysPersist => "Always*",
             ApprovalChoice::Reject => "Reject",
             ApprovalChoice::EditFeedback => "Edit feedback",
         }
@@ -42,6 +48,14 @@ impl ApprovalChoice {
                 ApprovalChoice::Allow => Style::default()
                     .fg(Color::Black)
                     .bg(theme.success)
+                    .add_modifier(Modifier::BOLD),
+                ApprovalChoice::AlwaysSession => Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+                ApprovalChoice::AlwaysPersist => Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Magenta)
                     .add_modifier(Modifier::BOLD),
                 ApprovalChoice::Reject => Style::default()
                     .fg(Color::Black)
