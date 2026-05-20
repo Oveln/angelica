@@ -1,10 +1,13 @@
 pub mod agent;
 pub mod config;
+pub mod fatigue;
 pub mod llm;
 pub mod mcp;
 pub mod memory;
 pub mod permission;
-pub mod session;
+pub mod prompt;
 pub mod skills;
+pub mod sleep;
+pub mod state;
 pub mod tools;
 pub mod tui;

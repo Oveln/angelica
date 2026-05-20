@@ -15,7 +15,7 @@ impl Tool for WriteFileTool {
     }
 
     fn description(&self) -> &str {
-        "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Parent directories are auto-created. The user will be asked to review the diff before writing."
+        "将内容写入文件。你可以创造、覆盖文件。用户会先看到改动。"
     }
 
     fn parameters(&self) -> Value {

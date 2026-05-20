@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::permission::PermissionConfig;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     #[serde(default)]
     pub llm: LlmConfig,
@@ -14,9 +14,11 @@ pub struct Config {
     #[serde(default)]
     pub skills: SkillsConfig,
     #[serde(default)]
-    pub session: SessionConfig,
-    #[serde(default)]
     pub permission: PermissionConfig,
+    #[serde(default)]
+    pub state: StateConfig,
+    #[serde(default)]
+    pub fatigue: FatigueConfig,
 }
 
 impl Config {
@@ -32,12 +34,16 @@ impl Config {
     }
 
     pub fn resolve_paths(&mut self, base: &Path) {
-        self.memory.agent_memory_path = Self::absolute_or(base, &self.memory.agent_memory_path);
-        self.memory.user_profile_path = Self::absolute_or(base, &self.memory.user_profile_path);
+        self.memory.memory_path = Self::absolute_or(base, &self.memory.memory_path);
+        self.memory.profile_path = Self::absolute_or(base, &self.memory.profile_path);
         self.memory.soul_path = Self::absolute_or(base, &self.memory.soul_path);
+        self.memory.notebook_path = Self::absolute_or(base, &self.memory.notebook_path);
         self.skills.directory = Self::absolute_or(base, &self.skills.directory);
-        self.session.directory = Self::absolute_or(base, &self.session.directory);
         self.permission.approved_path = Self::absolute_or(base, &self.permission.approved_path);
+        self.state.path = Self::absolute_or(base, &self.state.path);
+        self.state.conversation_path = Self::absolute_or(base, &self.state.conversation_path);
+        self.state.archive_dir = Self::absolute_or(base, &self.state.archive_dir);
+        self.state.snapshots_dir = Self::absolute_or(base, &self.state.snapshots_dir);
     }
 
     fn absolute_or(base: &Path, path: &str) -> String {
@@ -57,8 +63,9 @@ impl Default for Config {
             memory: MemoryConfig::default(),
             mcp: McpConfig::default(),
             skills: SkillsConfig::default(),
-            session: SessionConfig::default(),
             permission: PermissionConfig::default(),
+            state: StateConfig::default(),
+            fatigue: FatigueConfig::default(),
         }
     }
 }
@@ -80,6 +87,8 @@ pub struct LlmConfig {
     pub api_key: Option<String>,
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u32,
+    #[serde(default)]
+    pub role_immersion: Option<bool>,
 }
 
 impl Default for LlmConfig {
@@ -93,6 +102,7 @@ impl Default for LlmConfig {
             reasoning_effort: default_reasoning_effort(),
             api_key: None,
             max_iterations: default_max_iterations(),
+            role_immersion: None,
         }
     }
 }
@@ -118,50 +128,93 @@ fn default_true() -> bool {
 fn default_max_iterations() -> u32 {
     10
 }
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct MemoryConfig {
-    #[serde(default = "default_agent_memory_path")]
-    pub agent_memory_path: String,
-    #[serde(default = "default_user_profile_path")]
-    pub user_profile_path: String,
-    #[serde(default = "default_soul_path")]
+    pub memory_path: String,
+    pub profile_path: String,
     pub soul_path: String,
-    #[serde(default = "default_max_file_size_kb")]
+    pub notebook_path: String,
     pub max_file_size_kb: usize,
 }
 
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            agent_memory_path: default_agent_memory_path(),
-            user_profile_path: default_user_profile_path(),
+            memory_path: default_memory_path(),
+            profile_path: default_profile_path(),
             soul_path: default_soul_path(),
+            notebook_path: default_notebook_path(),
             max_file_size_kb: default_max_file_size_kb(),
         }
     }
 }
 
-fn default_agent_memory_path() -> String {
-    "data/agent_memory.md".to_string()
+fn default_memory_path() -> String {
+    "data/MEMORY.md".to_string()
 }
-fn default_user_profile_path() -> String {
-    "data/user_profile.md".to_string()
+fn default_profile_path() -> String {
+    "data/profile.md".to_string()
 }
 fn default_soul_path() -> String {
     "data/SOUL.md".to_string()
+}
+fn default_notebook_path() -> String {
+    "data/notebook.md".to_string()
 }
 fn default_max_file_size_kb() -> usize {
     32
 }
 
-#[derive(Debug, Deserialize, Default)]
+// Custom Deserialize to support old config keys (agent_memory_path, user_profile_path)
+impl<'de> serde::Deserialize<'de> for MemoryConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct RawMemory {
+            #[serde(default = "default_memory_path")]
+            memory_path: String,
+            #[serde(default = "default_profile_path")]
+            profile_path: String,
+            #[serde(default = "default_soul_path")]
+            soul_path: String,
+            #[serde(default = "default_notebook_path")]
+            notebook_path: String,
+            #[serde(default = "default_max_file_size_kb")]
+            max_file_size_kb: usize,
+            #[serde(default = "default_memory_path")]
+            agent_memory_path: String,
+            #[serde(default = "default_profile_path")]
+            user_profile_path: String,
+        }
+        let raw = RawMemory::deserialize(d)?;
+        Ok(MemoryConfig {
+            memory_path: if raw.memory_path == default_memory_path()
+                && raw.agent_memory_path != default_memory_path()
+            {
+                raw.agent_memory_path
+            } else {
+                raw.memory_path
+            },
+            profile_path: if raw.profile_path == default_profile_path()
+                && raw.user_profile_path != default_profile_path()
+            {
+                raw.user_profile_path
+            } else {
+                raw.profile_path
+            },
+            soul_path: raw.soul_path,
+            notebook_path: raw.notebook_path,
+            max_file_size_kb: raw.max_file_size_kb,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
 pub struct McpConfig {
     #[serde(default)]
     pub servers: std::collections::HashMap<String, McpServerConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct McpServerConfig {
     #[serde(default = "default_stdio")]
     pub transport: String,
@@ -177,7 +230,7 @@ fn default_stdio() -> String {
     "stdio".to_string()
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct SkillsConfig {
     #[serde(default = "default_skills_dir")]
     pub directory: String,
@@ -195,22 +248,87 @@ fn default_skills_dir() -> String {
     "skills".to_string()
 }
 
-#[derive(Debug, Deserialize)]
-pub struct SessionConfig {
-    #[serde(default = "default_session_dir")]
-    pub directory: String,
+#[derive(Debug, Deserialize, Clone)]
+pub struct StateConfig {
+    #[serde(default = "default_state_path")]
+    pub path: String,
+    #[serde(default = "default_conversation_path")]
+    pub conversation_path: String,
+    #[serde(default = "default_archive_dir")]
+    pub archive_dir: String,
+    #[serde(default = "default_snapshots_dir")]
+    pub snapshots_dir: String,
+    #[serde(default = "default_max_snapshots")]
+    pub max_snapshots: usize,
 }
 
-impl Default for SessionConfig {
+impl Default for StateConfig {
     fn default() -> Self {
         Self {
-            directory: default_session_dir(),
+            path: default_state_path(),
+            conversation_path: default_conversation_path(),
+            archive_dir: default_archive_dir(),
+            snapshots_dir: default_snapshots_dir(),
+            max_snapshots: default_max_snapshots(),
         }
     }
 }
 
-fn default_session_dir() -> String {
-    "data/sessions".to_string()
+fn default_state_path() -> String {
+    "data/state.json".to_string()
+}
+fn default_conversation_path() -> String {
+    "data/conversation.jsonl".to_string()
+}
+fn default_archive_dir() -> String {
+    "data/archive".to_string()
+}
+fn default_snapshots_dir() -> String {
+    "data/snapshots".to_string()
+}
+fn default_max_snapshots() -> usize {
+    20
+}
+#[derive(Debug, Deserialize, Clone)]
+pub struct FatigueConfig {
+    #[serde(default = "default_per_turn_base")]
+    pub per_turn_base: f64,
+    #[serde(default = "default_per_tool_call_ratio")]
+    pub per_tool_call_ratio: f64,
+    #[serde(default = "default_sleep_threshold")]
+    pub sleep_threshold: f64,
+    #[serde(default = "default_can_sleep_threshold")]
+    pub can_sleep_threshold: f64,
+    #[serde(default = "default_groggy_turns")]
+    pub groggy_turns: u32,
+}
+
+impl Default for FatigueConfig {
+    fn default() -> Self {
+        Self {
+            per_turn_base: default_per_turn_base(),
+            per_tool_call_ratio: default_per_tool_call_ratio(),
+            sleep_threshold: default_sleep_threshold(),
+            can_sleep_threshold: default_can_sleep_threshold(),
+            groggy_turns: default_groggy_turns(),
+        }
+    }
+}
+
+fn default_per_turn_base() -> f64 {
+    0.015
+}
+fn default_per_tool_call_ratio() -> f64 {
+    0.333
+}
+fn default_sleep_threshold() -> f64 {
+    1.0
+}
+fn default_can_sleep_threshold() -> f64 {
+    0.8
+}
+fn default_groggy_turns() -> u32 {
+    3
 }
 
 #[cfg(test)]
@@ -221,7 +339,7 @@ mod tests {
     fn parse_default_config() {
         let config = Config::default();
         assert_eq!(config.llm.model, "deepseek-v4-flash");
-        assert_eq!(config.llm.thinking, true);
+        assert!(config.llm.thinking);
     }
 
     #[test]
@@ -234,12 +352,24 @@ max_tokens = 8192
 thinking = false
 
 [memory]
-agent_memory_path = "data/mem.md"
+memory_path = "data/mem.md"
 max_file_size_kb = 64
 "#;
         let config = Config::from_str(toml).unwrap();
         assert_eq!(config.llm.model, "deepseek-v4-pro");
-        assert_eq!(config.llm.thinking, false);
+        assert!(!config.llm.thinking);
         assert_eq!(config.memory.max_file_size_kb, 64);
+    }
+
+    #[test]
+    fn parse_old_memory_keys() {
+        let toml = r#"
+[memory]
+agent_memory_path = "data/old_memory.md"
+user_profile_path = "data/old_profile.md"
+"#;
+        let config = Config::from_str(toml).unwrap();
+        assert_eq!(config.memory.memory_path, "data/old_memory.md");
+        assert_eq!(config.memory.profile_path, "data/old_profile.md");
     }
 }

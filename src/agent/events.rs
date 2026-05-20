@@ -1,5 +1,3 @@
-use crate::session::SessionEntry;
-
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     ThinkingDelta {
@@ -40,11 +38,11 @@ pub enum AppEvent {
         message: String,
     },
 
-    SessionList {
-        sessions: Vec<SessionEntry>,
-    },
-    SessionLoaded {
-        messages: Vec<crate::llm::types::ChatMessage>,
+    // Life state events
+    FallingAsleep,
+    Sleeping,
+    WakingUp {
+        dream: String,
     },
 }
 
@@ -62,9 +60,6 @@ pub enum UserAction {
     RejectTool {
         feedback: Option<String>,
     },
-    ClearHistory,
-    ResumeSession {
-        session_id: String,
-    },
+    ForceSleep,
     Quit,
 }

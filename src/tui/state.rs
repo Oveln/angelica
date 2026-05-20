@@ -317,8 +317,7 @@ fn find_tool_by_call_id_mut<'a>(
 const QUIET_TOOLS: &[&str] = &[
     "read_file",
     "list_dir",
-    "query_sessions",
-    "update_agent_memory",
-    "update_user_profile",
-    "update_soul",
+    "edit_soul",
+    "edit_memory",
+    "edit_profile",
 ];

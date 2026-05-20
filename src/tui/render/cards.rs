@@ -20,8 +20,14 @@ pub(super) fn render_inline_tool(
 
     if let Some(diff) = diff_preview {
         if collapsed {
-            let added = diff.lines().filter(|l| l.starts_with('+') && !l.starts_with("+++")).count();
-            let removed = diff.lines().filter(|l| l.starts_with('-') && !l.starts_with("---")).count();
+            let added = diff
+                .lines()
+                .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+                .count();
+            let removed = diff
+                .lines()
+                .filter(|l| l.starts_with('-') && !l.starts_with("---"))
+                .count();
             let summary = result.unwrap_or("");
             let rail_style = Style::default().fg(theme.rail).bg(panel_bg);
             lines.push(trailing_pad_line(
@@ -29,15 +35,18 @@ pub(super) fn render_inline_tool(
                 vec![
                     Span::styled(
                         format!("+{}", added),
-                        Style::default().fg(theme.success).bg(panel_bg).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(theme.success)
+                            .bg(panel_bg)
+                            .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(
-                        " ".to_string(),
-                        Style::default().bg(panel_bg),
-                    ),
+                    Span::styled(" ".to_string(), Style::default().bg(panel_bg)),
                     Span::styled(
                         format!("-{}", removed),
-                        Style::default().fg(theme.error).bg(panel_bg).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(theme.error)
+                            .bg(panel_bg)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         format!("  {}", summary),
@@ -63,10 +72,7 @@ pub(super) fn render_inline_tool(
                 let rail_style = Style::default().fg(theme.rail).bg(panel_bg);
                 lines.push(trailing_pad_line(
                     CARD_BOT,
-                    vec![Span::styled(
-                        String::new(),
-                        Style::default().bg(panel_bg),
-                    )],
+                    vec![Span::styled(String::new(), Style::default().bg(panel_bg))],
                     rail_style,
                     width,
                 ));

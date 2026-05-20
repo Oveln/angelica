@@ -1,3 +1,4 @@
+pub mod patch;
 pub mod types;
 
 use futures::StreamExt;

@@ -6,18 +6,32 @@ temperature = 0.7
 thinking = true
 reasoning_effort = "high"
 max_iterations = 15
+# role_immersion = true    # true = 强制开启, false = 强制关闭, 不设置 = 自动检测
 
 [memory]
-agent_memory_path = "data/agent_memory.md"
-user_profile_path = "data/user_profile.md"
+memory_path = "data/MEMORY.md"
+profile_path = "data/profile.md"
 soul_path = "data/SOUL.md"
+notebook_path = "data/notebook.md"
 max_file_size_kb = 32
 
 [skills]
 directory = "skills"
 
-[session]
-directory = "data/sessions"
+[state]
+path = "data/state.json"
+conversation_path = "data/conversation.jsonl"
+archive_dir = "data/archive"
+snapshots_dir = "data/snapshots"
+max_snapshots = 20
+
+[fatigue]
+reference_context_window = 64000
+per_turn_base = 0.015
+per_tool_call_ratio = 0.333
+sleep_threshold = 1.0
+can_sleep_threshold = 0.8
+groggy_turns = 3
 
 # Example MCP server configs:
 # [mcp.servers.filesystem]

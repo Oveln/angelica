@@ -20,10 +20,6 @@ pub async fn handle_key(state: &mut AppState, key: KeyEvent, tx: &mpsc::Sender<U
                 state.input.set(msg);
             }
         }
-        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.messages.clear();
-            let _ = tx.send(UserAction::ClearHistory).await;
-        }
         KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.toggle_last_collapsed();
         }

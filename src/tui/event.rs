@@ -38,12 +38,7 @@ impl AppState {
                 diff_preview,
             } => {
                 let show = self.should_show_tool_result(name);
-                self.complete_tool(
-                    call_id,
-                    result.clone(),
-                    diff_preview.clone(),
-                    !show,
-                );
+                self.complete_tool(call_id, result.clone(), diff_preview.clone(), !show);
             }
             AppEvent::ToolCalling {
                 call_id,
@@ -109,39 +104,17 @@ impl AppState {
             AppEvent::Error { message } => {
                 self.add_chat("system", &format!("Error: {}", message), None);
             }
-            AppEvent::SessionList { sessions } => {
-                if let AppMode::SessionPicker(ref mut sp) = self.mode {
-                    sp.sessions = sessions.clone();
-                    sp.rebuild_matches();
-                }
-            }
-            AppEvent::SessionLoaded { messages } => {
-                self.messages.clear();
-                self.thinking_buffer.clear();
-                self.text_buffer.clear();
+            AppEvent::FallingAsleep => {
                 self.is_streaming = false;
-
-                for msg in messages {
-                    match msg.role.as_str() {
-                        "user" => {
-                            self.add_chat("user", msg.content.as_deref().unwrap_or(""), None);
-                        }
-                        "assistant" => {
-                            let thinking = msg.reasoning_content.clone();
-                            let content = msg.content.clone().unwrap_or_default();
-                            self.add_chat("assistant", &content, thinking);
-                        }
-                        _ => {}
-                    }
-                }
-
                 self.mode = AppMode::Chat;
-                self.scroll.to_bottom();
-                self.add_chat(
-                    "system",
-                    &format!("Session restored ({} messages)", self.messages.len()),
-                    None,
-                );
+                self.add_chat("system", "祈芷正在沉睡...", None);
+            }
+            AppEvent::Sleeping => {
+                self.is_streaming = false;
+                self.mode = AppMode::Chat;
+            }
+            AppEvent::WakingUp { dream: _ } => {
+                self.add_chat("system", "祈芷醒来了，梦的余韵还留在心头。", None);
             }
         }
     }

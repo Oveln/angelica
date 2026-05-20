@@ -79,36 +79,6 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
             };
             mode::approval::draw_choices(f, state, approval_chunks[input_idx], &theme);
         }
-        AppMode::SessionPicker(sp) => {
-            mode::session::draw(f, state, f.area(), &theme);
-
-            let filter = &sp.filter;
-            let prompt = "filter: ";
-            let prompt_w = UnicodeWidthStr::width(prompt) as u16;
-            let filter_w = UnicodeWidthStr::width(filter.as_str()) as u16;
-            let border_color = theme.accent;
-
-            let input_spans = vec![
-                Span::styled(
-                    prompt,
-                    Style::default()
-                        .fg(theme.muted)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(filter.clone(), Style::default().fg(theme.input)),
-            ];
-            let content = Line::from(input_spans);
-            let input = Paragraph::new(content).block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .border_style(Style::default().fg(border_color)),
-            );
-            f.render_widget(input, chunks[1]);
-
-            let cursor_x = chunks[1].x + prompt_w + filter_w;
-            let cursor_y = chunks[1].y + 1;
-            f.set_cursor_position((cursor_x, cursor_y));
-        }
         _ => {
             draw_input(f, state, chunks[1], &theme);
         }
@@ -210,7 +180,6 @@ fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
         AppMode::Streaming => "\u{25CF} streaming",
         AppMode::Approval(_) => "\u{25D0} approval",
         AppMode::SlashMenu(_) => "\u{25CB} idle",
-        AppMode::SessionPicker(_) => "\u{25CB} resume",
     };
     let mode_style = match &state.mode {
         AppMode::Streaming => Style::default().fg(theme.success),

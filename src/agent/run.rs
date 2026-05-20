@@ -2,6 +2,7 @@ use tokio::sync::mpsc;
 
 use super::Agent;
 use super::events::{AppEvent, UserAction};
+use crate::agent::modes::SleepingMode;
 use crate::config::Config;
 
 pub async fn run(
@@ -9,9 +10,7 @@ pub async fn run(
     mut user_rx: mpsc::Receiver<UserAction>,
     event_tx: mpsc::Sender<AppEvent>,
 ) {
-    let mut agent = Agent::new(config);
-
-    agent.permissions.load_approved(&agent.approved_path);
+    let mut agent = Agent::awake(config);
 
     if let Err(e) = agent.initialize().await {
         let _ = event_tx
@@ -22,13 +21,11 @@ pub async fn run(
         return;
     }
 
-    run_loop(&mut agent, &mut user_rx, &event_tx).await;
-
-    agent.shutdown().await;
+    run_loop(agent, &mut user_rx, &event_tx).await;
 }
 
 async fn run_loop(
-    agent: &mut Agent,
+    mut agent: Agent,
     user_rx: &mut mpsc::Receiver<UserAction>,
     event_tx: &mpsc::Sender<AppEvent>,
 ) {
@@ -36,10 +33,18 @@ async fn run_loop(
         match action {
             UserAction::SendMessage { content } => {
                 agent.push_user_message(&content);
-                agent.iteration = 0;
-                agent.tool_queue.clear();
+                agent.reset_iteration();
                 let _ = agent.step(event_tx).await;
                 agent.save_if_dirty().await;
+
+                if agent.should_sleep() {
+                    let _ = event_tx.send(AppEvent::FallingAsleep).await;
+                    agent = execute_sleep(agent, event_tx).await;
+                }
+            }
+            UserAction::ForceSleep => {
+                let _ = event_tx.send(AppEvent::FallingAsleep).await;
+                agent = execute_sleep(agent, event_tx).await;
             }
             UserAction::ApprovePending => {
                 let _ = agent.approve_and_step(event_tx).await;
@@ -66,52 +71,140 @@ async fn run_loop(
                     .await;
                 agent.save_if_dirty().await;
             }
-            UserAction::ClearHistory => {
-                agent.clear_history();
-            }
-            UserAction::ResumeSession { session_id } => {
-                if session_id.is_empty() {
-                    match agent.sessions.query_sessions("", 20) {
-                        Ok(sessions) => {
-                            let _ = event_tx.send(AppEvent::SessionList { sessions }).await;
-                        }
-                        Err(e) => {
-                            let _ = event_tx
-                                .send(AppEvent::Error {
-                                    message: format!("Failed to query sessions: {}", e),
-                                })
-                                .await;
-                        }
-                    }
-                } else {
-                    match agent.sessions.load_session_messages(&session_id) {
-                        Ok(messages) => {
-                            agent.history.clear();
-                            for msg in &messages {
-                                agent.history.push(msg.clone());
-                            }
-                            agent.tool_queue.clear();
-                            agent.pending_approval = None;
-                            agent.iteration = 0;
-                            agent.dirty = true;
-                            let _ = event_tx.send(AppEvent::SessionLoaded { messages }).await;
-                        }
-                        Err(e) => {
-                            let _ = event_tx
-                                .send(AppEvent::Error {
-                                    message: format!(
-                                        "Failed to load session {}: {}",
-                                        session_id, e
-                                    ),
-                                })
-                                .await;
-                        }
-                    }
-                }
-            }
             UserAction::Quit => {
                 break;
             }
         }
     }
+
+    agent.shutdown().await;
+}
+
+async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent {
+    agent.save_state();
+
+    let config = agent.config().clone();
+    let memory = agent.memory().clone();
+    let skills = agent.skills().clone();
+    let conversation_messages: Vec<_> = agent.history_messages().to_vec();
+
+    let (conversation_text, fatigue_desc, turns, tool_calls, fatigue_val) = {
+        let awake = agent.run_state_as_awake();
+        let (t, tc, f) = awake.fatigue_info();
+        (
+            crate::sleep::build_conversation_text(&conversation_messages),
+            awake.fatigue_desc().to_string(),
+            t,
+            tc,
+            f,
+        )
+    };
+
+    let _ = event_tx.send(AppEvent::Sleeping).await;
+
+    // Phase 1: snapshot
+    let snapshot_ts = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+    let snapshot_dir = std::path::Path::new(&config.state.snapshots_dir).join(&snapshot_ts);
+    if let Err(e) = memory.create_snapshot(&snapshot_dir) {
+        tracing::error!("Failed to create snapshot: {}", e);
+    }
+
+    // Phase 2: archive conversation
+    let archive_dir = std::path::Path::new(&config.state.archive_dir);
+    if let Err(e) = std::fs::create_dir_all(archive_dir) {
+        tracing::error!("Failed to create archive dir: {}", e);
+    }
+    let archive_path = archive_dir.join(format!("{}.jsonl", snapshot_ts));
+    if !conversation_messages.is_empty() {
+        let now_ts = chrono::Local::now().to_rfc3339();
+        if let Ok(mut file) = std::fs::File::create(&archive_path) {
+            use std::io::Write;
+            for (i, msg) in conversation_messages.iter().enumerate() {
+                let tm = crate::agent::history::TimedMessage {
+                    ts: format!("{} (msg {})", now_ts, i),
+                    message: msg.clone(),
+                };
+                let _ = writeln!(file, "{}", serde_json::to_string(&tm).unwrap_or_default());
+            }
+        }
+    }
+
+    // Phase 3: create sleep agent and run full ReAct loop
+    let sleeping = SleepingMode::new(
+        memory.clone(),
+        conversation_text,
+        turns,
+        tool_calls,
+        fatigue_desc,
+    );
+
+    let sleep_history_path = std::path::PathBuf::from(&config.state.archive_dir)
+        .join(format!("{}.sleep.jsonl", snapshot_ts));
+    let mut sleep_agent = Agent::new(
+        config.clone(),
+        Box::new(sleeping),
+        memory.clone(),
+        skills.clone(),
+        crate::agent::history::History::new(sleep_history_path),
+    );
+
+    loop {
+        if event_tx.is_closed() {
+            break;
+        }
+        if sleep_agent.step(event_tx).await {
+            continue;
+        }
+        if sleep_agent.is_finished() {
+            break;
+        }
+    }
+
+    // Phase 4: capture dream
+    let dream = sleep_agent.run_state_as_sleeping_mut().take_dream();
+
+    // Phase 5: save sleep record
+    let sleep_record = serde_json::json!({
+        "timestamp": snapshot_ts,
+        "turns": turns,
+        "tool_calls": tool_calls,
+        "fatigue": fatigue_val,
+        "dream": dream,
+    });
+    let sleep_path = archive_dir.join(format!("{}.sleep.json", snapshot_ts));
+    if let Err(e) = std::fs::write(
+        &sleep_path,
+        serde_json::to_string_pretty(&sleep_record).unwrap_or_default(),
+    ) {
+        tracing::error!("Failed to write sleep record: {}", e);
+    }
+
+    // Phase 6: cleanup old snapshots
+    if let Err(e) = crate::sleep::cleanup_old_snapshots(
+        std::path::Path::new(&config.state.snapshots_dir),
+        config.state.max_snapshots,
+    ) {
+        tracing::error!("Failed to cleanup old snapshots: {}", e);
+    }
+
+    // Phase 7: build new awake agent with dream afterglow
+    let mut new_agent = Agent::awake(config);
+
+    {
+        let new_awake = new_agent.run_state_as_awake_mut();
+        if let Some(d) = &dream {
+            new_awake.set_dream(d.clone());
+        }
+        new_awake.set_last_snapshot(snapshot_ts);
+    }
+
+    if let Err(e) = new_agent.initialize().await {
+        tracing::error!("Failed to initialize agent after sleep: {}", e);
+    }
+
+    if let Some(dream) = dream {
+        let _ = event_tx.send(AppEvent::WakingUp { dream }).await;
+    }
+
+    new_agent
 }

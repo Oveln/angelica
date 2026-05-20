@@ -1,12 +1,12 @@
 use crate::llm::types::ToolCall;
 
-pub(super) struct BatchedEdit {
+pub(crate) struct BatchedEdit {
     pub tc_id: String,
     pub search: String,
     pub replace: String,
 }
 
-pub(super) struct PendingApproval {
+pub(crate) struct PendingApproval {
     pub tc_ids: Vec<String>,
     pub tool_name: String,
     pub args: serde_json::Value,
@@ -17,13 +17,13 @@ pub(super) struct PendingApproval {
 
 // ── Tool call grouping ──
 
-pub(super) struct GroupedEdit {
+pub(crate) struct GroupedEdit {
     pub tc_id: String,
     pub search: String,
     pub replace: String,
 }
 
-pub(super) enum ToolCallGroup {
+pub(crate) enum ToolCallGroup {
     Single {
         tc: ToolCall,
     },

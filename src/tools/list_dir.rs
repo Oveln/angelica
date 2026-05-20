@@ -14,7 +14,7 @@ impl Tool for ListDirTool {
     }
 
     fn description(&self) -> &str {
-        "List entries in a directory. Returns each entry's name and type (file or directory)."
+        "看看一个目录里有什么。"
     }
 
     fn parameters(&self) -> Value {

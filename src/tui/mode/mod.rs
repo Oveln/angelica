@@ -1,10 +1,8 @@
 pub(crate) mod approval;
 pub(crate) mod chat;
-pub(crate) mod session;
 pub(crate) mod slash;
 
 pub use approval::ApprovalState;
-pub use session::{SessionAction, SessionPickerState};
 pub use slash::{SlashAction, SlashMenuState};
 
 use tokio::sync::mpsc;
@@ -77,7 +75,6 @@ pub enum AppMode {
     Chat,
     Streaming,
     SlashMenu(SlashMenuState),
-    SessionPicker(SessionPickerState),
     Approval(ApprovalState),
 }
 
@@ -109,10 +106,6 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
                     ));
                 }
                 state.add_chat("system", &help, None);
-            }
-            "clear" => {
-                state.messages.clear();
-                let _ = tx.send(UserAction::ClearHistory).await;
             }
             "quit" | "q" => {
                 state.should_quit = true;
@@ -157,24 +150,6 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
                     &format!("{} messages ({} user)", count, user_count),
                     None,
                 );
-            }
-            "resume" | "r" => {
-                if state.is_streaming {
-                    state.add_chat("system", "Cannot resume while streaming", None);
-                } else if let Some(arg) = _arg {
-                    let _ = tx
-                        .send(UserAction::ResumeSession {
-                            session_id: arg.trim().to_string(),
-                        })
-                        .await;
-                } else {
-                    state.mode = AppMode::SessionPicker(SessionPickerState::new(Vec::new()));
-                    let _ = tx
-                        .send(UserAction::ResumeSession {
-                            session_id: String::new(),
-                        })
-                        .await;
-                }
             }
             _ => {
                 state.add_chat("system", &format!("Unknown command: /{}", cmd_name), None);

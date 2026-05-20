@@ -15,7 +15,7 @@ impl Tool for EditFileTool {
     }
 
     fn description(&self) -> &str {
-        "Replace text in a file via exact search/replace. The search string must match exactly including whitespace and indentation. The search must be unique in the file — if there are multiple matches, the tool returns an error so you can provide a more specific search string. The user will be asked to review the diff before applying. You can return multiple edit_file calls for the same file in one response — they will be batched into a single combined preview."
+        "精确地修改文件中的文字。用户会先看到改动。"
     }
 
     fn parameters(&self) -> Value {

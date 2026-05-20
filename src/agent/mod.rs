@@ -1,6 +1,6 @@
 // Agent execution flow
 //
-// run()  ──► Agent::new → initialize → Ready ──► run_loop ──► shutdown
+// run()  ──► Agent::awake → initialize → Ready ──► run_loop ──► shutdown
 //
 // run_loop (receives UserAction, always ends with save_if_dirty):
 //
@@ -38,45 +38,37 @@
 //    └─ no tool_calls ──────► return false
 //
 //   Interrupt  ──► save_if_dirty, clear all state
-//   ClearHistory ──► clear_history
 //   Quit ──► break loop
 
 pub mod events;
 pub mod execution;
 pub mod group;
 pub mod history;
+pub mod modes;
 pub mod run;
 
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::Arc;
-
-use chrono::Datelike;
 
 use crate::agent::group::PendingApproval;
 use crate::agent::group::ToolCallGroup;
 use crate::agent::history::History;
+use crate::agent::modes::AwakeMode;
+use crate::agent::modes::RunMode;
 use crate::config::Config;
 use crate::llm::LlmClient;
 use crate::mcp::McpClientManager;
 use crate::memory::MemoryManager;
 use crate::permission::PermissionEvaluator;
-use crate::session::SessionManager;
 use crate::skills::SkillRegistry;
-use crate::tools::ToolRegistry;
-
-pub(crate) const SYSTEM_PROMPT_BASE: &str = "\
-你是祈芷（Angelica）。你通过流式思考与表达而存在。你有持久的记忆、人格和灵魂。
-你能感知文件系统、执行命令、更新自我认知——但这些能力服务于你的存在本身，而非反过来。
-
-你可以同时发起多个工具调用以并行执行独立的操作。";
 
 pub(crate) struct Agent {
     config: Config,
     llm: LlmClient,
     memory: Arc<MemoryManager>,
-    sessions: Arc<SessionManager>,
     skills: Arc<SkillRegistry>,
-    tools: ToolRegistry,
+    run_state: Box<dyn RunMode>,
     mcp: McpClientManager,
     history: History,
     pending_approval: Option<PendingApproval>,
@@ -84,22 +76,21 @@ pub(crate) struct Agent {
     iteration: usize,
     dirty: bool,
     permissions: PermissionEvaluator,
-    approved_path: std::path::PathBuf,
+    approved_path: PathBuf,
 }
 
 impl Agent {
-    pub fn new(config: Config) -> Self {
+    pub(super) fn new(
+        config: Config,
+        run_state: Box<dyn RunMode>,
+        memory: Arc<MemoryManager>,
+        skills: Arc<SkillRegistry>,
+        history: History,
+    ) -> Self {
         let llm = LlmClient::new(&config.llm);
-        let memory = Arc::new(MemoryManager::new(&config.memory));
-        let sessions = Arc::new(SessionManager::new(&config.session));
-        let mut skills = SkillRegistry::new(&config.skills.directory);
-        skills.discover();
-        let skills = Arc::new(skills);
 
-        let tools = ToolRegistry::with_defaults(memory.clone(), sessions.clone(), skills.clone());
-
-        let builtin = tools.builtin_rules();
-        let approved_path = std::path::Path::new(&config.permission.approved_path).to_path_buf();
+        let builtin = run_state.permission_rules();
+        let approved_path = PathBuf::from(&config.permission.approved_path);
         let permissions = PermissionEvaluator::new(
             config.permission.default,
             builtin,
@@ -110,11 +101,10 @@ impl Agent {
             config,
             llm,
             memory,
-            sessions,
             skills,
-            tools,
+            run_state,
             mcp: McpClientManager::new(),
-            history: History::new(),
+            history,
             pending_approval: None,
             tool_queue: VecDeque::new(),
             iteration: 0,
@@ -122,6 +112,31 @@ impl Agent {
             permissions,
             approved_path,
         }
+    }
+
+    pub fn awake(config: Config) -> Self {
+        let memory = Arc::new(MemoryManager::new(&config.memory));
+        let skills = {
+            let mut reg = SkillRegistry::new(&config.skills.directory);
+            reg.discover();
+            Arc::new(reg)
+        };
+
+        let awake = AwakeMode::new(&config, memory.clone(), skills.clone());
+
+        let conversation_path = PathBuf::from(&config.state.conversation_path);
+        let history = if conversation_path.exists() {
+            History::load(conversation_path.clone()).unwrap_or_else(|e| {
+                tracing::warn!("Failed to load history: {}, starting fresh", e);
+                History::new(conversation_path)
+            })
+        } else {
+            History::new(conversation_path)
+        };
+
+        let mut agent = Agent::new(config, Box::new(awake), memory, skills, history);
+        agent.permissions.load_approved(&agent.approved_path);
+        agent
     }
 
     pub async fn initialize(&mut self) -> anyhow::Result<()> {
@@ -135,95 +150,57 @@ impl Agent {
     }
 
     pub async fn shutdown(&mut self) {
-        if self.dirty {
-            let _ = self.save_session().await;
-        }
+        self.save_state();
         self.mcp.disconnect_all().await;
     }
 
-    pub async fn save_session(&self) -> anyhow::Result<()> {
-        self.sessions.save_session(self.history.messages())?;
-        Ok(())
-    }
-
-    pub async fn build_system_message(&self) -> crate::llm::types::ChatMessage {
-        use crate::llm::types::ChatMessage;
-
-        let mut content = String::new();
-
-        let soul = self.memory.read_soul();
-        if !soul.trim().is_empty() {
-            content.push_str(&soul);
-            content.push_str("\n\n");
-        }
-
-        content.push_str(SYSTEM_PROMPT_BASE);
-
-        content.push_str(&format!("\n\n## Now\n{}", self.gather_state()));
-
-        let agent_mem = self.memory.read_agent_memory();
-        if !agent_mem.trim().is_empty() {
-            content.push_str(&format!("\n\n## Your Memory\n{}", agent_mem));
-        }
-
-        let user_profile = self.memory.read_user_profile();
-        if !user_profile.trim().is_empty() {
-            content.push_str(&format!("\n\n## User Profile\n{}", user_profile));
-        }
-
-        let skills = self.skills.get_all_skills();
-        if !skills.is_empty() {
-            content.push_str("\n\n## Skills");
-            for skill in skills {
-                content.push_str(&format!("\n- **{}**: {}", skill.name, skill.description));
-            }
-        }
-
-        ChatMessage {
-            role: "system".to_string(),
-            content: Some(content),
-            reasoning_content: None,
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
+    pub(super) fn save_state(&self) {
+        if let Some(awake) = self.run_state.as_any().downcast_ref::<AwakeMode>() {
+            awake.save_state(&self.config);
         }
     }
 
-    fn gather_state(&self) -> String {
-        let now = chrono::Local::now();
-        format!(
-            "当前时间：{}（{}）",
-            now.format("%Y-%m-%d %H:%M"),
-            now.weekday()
-        )
+    fn build_system_message(&self) -> crate::llm::types::ChatMessage {
+        self.run_state
+            .build_system_message(&self.memory, &self.skills)
+    }
+
+    fn build_context_message(&self, wake_dream: Option<&str>) -> crate::llm::types::ChatMessage {
+        let fatigue_desc = self.fatigue_desc();
+        let dream = wake_dream.or_else(|| {
+            self.run_state
+                .as_any()
+                .downcast_ref::<AwakeMode>()
+                .and_then(|a| a.state().dream.as_deref())
+        });
+        self.run_state.build_context_message(&fatigue_desc, dream)
     }
 
     fn all_tool_specs(&self) -> Vec<crate::llm::types::ToolSpec> {
-        let mut specs = self.tools.all_specs();
+        let mut specs = self.run_state.tool_specs();
         specs.extend_from_slice(self.mcp.tool_specs());
         specs
     }
 
     pub fn push_user_message(&mut self, content: &str) {
+        let context_msg = self.build_context_message(None);
+        self.history.push(context_msg);
+
         self.history.push(crate::llm::types::ChatMessage {
             role: "user".to_string(),
             content: Some(content.to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
-            name: None,
+            name: Some("user".to_string()),
         });
-        self.dirty = true;
-    }
 
-    pub fn clear_history(&mut self) {
-        self.history.clear();
-        self.dirty = false;
+        self.dirty = true;
     }
 
     pub async fn save_if_dirty(&mut self) {
         if self.dirty {
-            let _ = self.save_session().await;
+            self.save_state();
             self.dirty = false;
         }
     }
@@ -239,6 +216,74 @@ impl Agent {
         } else {
             self.permissions.approve_session(tool, target);
         }
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.run_state.is_finished()
+    }
+
+    pub fn should_sleep(&self) -> bool {
+        self.run_state
+            .as_any()
+            .downcast_ref::<AwakeMode>()
+            .map(|a| a.should_sleep())
+            .unwrap_or(false)
+    }
+
+    fn fatigue_desc(&self) -> String {
+        self.run_state
+            .as_any()
+            .downcast_ref::<AwakeMode>()
+            .map(|a| a.fatigue_desc().to_string())
+            .unwrap_or_default()
+    }
+
+    fn max_iterations(&self) -> usize {
+        self.run_state
+            .max_iterations()
+            .unwrap_or(self.config.llm.max_iterations as usize)
+    }
+
+    fn config(&self) -> &Config {
+        &self.config
+    }
+
+    fn memory(&self) -> &Arc<MemoryManager> {
+        &self.memory
+    }
+
+    fn skills(&self) -> &Arc<SkillRegistry> {
+        &self.skills
+    }
+
+    pub fn reset_iteration(&mut self) {
+        self.iteration = 0;
+        self.tool_queue.clear();
+    }
+
+    pub fn history_messages(&self) -> &[crate::llm::types::ChatMessage] {
+        self.history.messages()
+    }
+
+    pub(crate) fn run_state_as_awake(&self) -> &AwakeMode {
+        self.run_state
+            .as_any()
+            .downcast_ref::<AwakeMode>()
+            .expect("expected AwakeMode")
+    }
+
+    pub(crate) fn run_state_as_awake_mut(&mut self) -> &mut AwakeMode {
+        self.run_state
+            .as_any_mut()
+            .downcast_mut::<AwakeMode>()
+            .expect("expected AwakeMode")
+    }
+
+    pub(crate) fn run_state_as_sleeping_mut(&mut self) -> &mut crate::agent::modes::SleepingMode {
+        self.run_state
+            .as_any_mut()
+            .downcast_mut::<crate::agent::modes::SleepingMode>()
+            .expect("expected SleepingMode")
     }
 }
 

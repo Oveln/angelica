@@ -12,7 +12,7 @@ impl Tool for RunCommandTool {
     }
 
     fn description(&self) -> &str {
-        "Execute a shell command. The user will be asked to approve before execution."
+        "执行一条命令。用户会先确认。"
     }
 
     fn parameters(&self) -> Value {

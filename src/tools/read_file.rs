@@ -18,7 +18,7 @@ impl Tool for ReadFileTool {
     }
 
     fn description(&self) -> &str {
-        "Read a file's contents. Supports line range via start_line and max_lines. Returns line-numbered output for large files."
+        "感知一个文件的内容。"
     }
 
     fn parameters(&self) -> Value {

@@ -12,7 +12,7 @@ enum ProcessOutcome {
 
 impl Agent {
     async fn execute_tool(&self, name: &str, args: serde_json::Value) -> String {
-        if let Some(tool) = self.tools.get(name) {
+        if let Some(tool) = self.run_state.get_tool(name) {
             match tool.execute(args).await {
                 Ok(result) => result,
                 Err(e) => format!("Error: {}", e),
@@ -30,6 +30,8 @@ impl Agent {
         group: ToolCallGroup,
         event_tx: &mpsc::Sender<AppEvent>,
     ) -> ProcessOutcome {
+        let stream_to_tui = self.run_state.stream_to_tui();
+
         match group {
             ToolCallGroup::Single { tc } => {
                 let name = tc.function.name.clone();
@@ -38,83 +40,107 @@ impl Agent {
                     Ok(v) => v,
                     Err(e) => {
                         let msg = format!("Invalid JSON in tool call arguments: {}", e);
-                        self.history.record_tool_result(tc_id.clone(), msg.clone());
-                        let _ = event_tx
-                            .send(AppEvent::ToolResult {
-                                call_id: tc_id,
-                                name: name.clone(),
-                                result: msg,
-                                diff_preview: None,
-                            })
-                            .await;
+                        if self.run_state.accumulate_history() {
+                            self.history.record_tool_result(tc_id.clone(), msg.clone());
+                        }
+                        if stream_to_tui {
+                            let _ = event_tx
+                                .send(AppEvent::ToolResult {
+                                    call_id: tc_id,
+                                    name: name.clone(),
+                                    result: msg,
+                                    diff_preview: None,
+                                })
+                                .await;
+                        }
                         return ProcessOutcome::Continue;
                     }
                 };
 
                 let target = self
-                    .tools
-                    .get(&name)
+                    .run_state
+                    .get_tool(&name)
                     .and_then(|t| t.permission_target(&args));
 
-                tracing::info!("evaluate: tool={}, target={:?}", name, target);
-                let action = self.permissions.evaluate(&name, target.as_deref());
-                tracing::info!("evaluate result: {:?}", action);
+                let action = if self.run_state.skip_permissions() {
+                    PermissionAction::Allow
+                } else {
+                    tracing::info!("evaluate: tool={}, target={:?}", name, target);
+                    let action = self.permissions.evaluate(&name, target.as_deref());
+                    tracing::info!("evaluate result: {:?}", action);
+                    action
+                };
+
                 match action {
                     PermissionAction::Allow => {
                         let diff_preview = self
-                            .tools
-                            .get(&name)
+                            .run_state
+                            .get_tool(&name)
                             .and_then(|t| t.preview(args.clone()).ok().flatten());
 
-                        let _ = event_tx
-                            .send(AppEvent::ToolCalling {
-                                call_id: tc.id.clone(),
-                                name: name.clone(),
-                                arguments: tc.function.arguments.clone(),
-                            })
-                            .await;
+                        if stream_to_tui {
+                            let _ = event_tx
+                                .send(AppEvent::ToolCalling {
+                                    call_id: tc.id.clone(),
+                                    name: name.clone(),
+                                    arguments: tc.function.arguments.clone(),
+                                })
+                                .await;
+                        }
                         let result = self.execute_tool(&name, args).await;
-                        let _ = event_tx
-                            .send(AppEvent::ToolResult {
-                                call_id: tc.id.clone(),
-                                name: name.clone(),
-                                result: result.clone(),
-                                diff_preview,
-                            })
-                            .await;
-                        self.history.record_tool_result(tc.id, result);
+                        if stream_to_tui {
+                            let _ = event_tx
+                                .send(AppEvent::ToolResult {
+                                    call_id: tc.id.clone(),
+                                    name: name.clone(),
+                                    result: result.clone(),
+                                    diff_preview,
+                                })
+                                .await;
+                        }
+                        if self.run_state.accumulate_history() {
+                            self.history.record_tool_result(tc.id, result);
+                        }
                         ProcessOutcome::Continue
                     }
                     PermissionAction::Deny => {
                         let msg = format!("Tool '{}' denied by permission policy.", name);
-                        self.history.record_tool_result(tc.id.clone(), msg.clone());
-                        let _ = event_tx
-                            .send(AppEvent::ToolResult {
-                                call_id: tc.id,
-                                name: name,
-                                result: msg,
-                                diff_preview: None,
-                            })
-                            .await;
+                        if self.run_state.accumulate_history() {
+                            self.history.record_tool_result(tc.id.clone(), msg.clone());
+                        }
+                        if stream_to_tui {
+                            let _ = event_tx
+                                .send(AppEvent::ToolResult {
+                                    call_id: tc.id,
+                                    name,
+                                    result: msg,
+                                    diff_preview: None,
+                                })
+                                .await;
+                        }
                         ProcessOutcome::Continue
                     }
                     PermissionAction::Ask => {
                         let preview = self.make_approval_preview(&name, &args, None);
-
                         let diff_preview = Self::extract_diff_preview(&preview);
 
-                        let tc_id = tc.id.clone();
-                        let _ = event_tx
-                            .send(AppEvent::ApprovalPending {
-                                call_id: tc_id.clone(),
-                                tool_name: name.clone(),
-                                tool_target: target.clone(),
-                                preview,
-                            })
-                            .await;
+                        if stream_to_tui {
+                            let _ = event_tx
+                                .send(AppEvent::ApprovalPending {
+                                    call_id: tc.id.clone(),
+                                    tool_name: name.clone(),
+                                    tool_target: target.clone(),
+                                    preview,
+                                })
+                                .await;
+                        }
 
-                        self.history
-                            .record_tool_result(tc_id, "Pending user approval...".to_string());
+                        if self.run_state.accumulate_history() {
+                            self.history.record_tool_result(
+                                tc.id.clone(),
+                                "Pending user approval...".to_string(),
+                            );
+                        }
                         self.pending_approval = Some(PendingApproval {
                             tc_ids: vec![tc.id],
                             tool_name: name,
@@ -129,12 +155,17 @@ impl Agent {
                 }
             }
             ToolCallGroup::BatchedEdits { path, edits } => {
-                tracing::info!(
-                    "evaluate: tool=edit_file (batched), target={:?}",
-                    Some(&path)
-                );
-                let action = self.permissions.evaluate("edit_file", Some(&path));
-                tracing::info!("evaluate result: {:?}", action);
+                let action = if self.run_state.skip_permissions() {
+                    PermissionAction::Allow
+                } else {
+                    tracing::info!(
+                        "evaluate: tool=edit_file (batched), target={:?}",
+                        Some(&path)
+                    );
+                    let action = self.permissions.evaluate("edit_file", Some(&path));
+                    tracing::info!("evaluate result: {:?}", action);
+                    action
+                };
 
                 match action {
                     PermissionAction::Allow => {
@@ -148,20 +179,20 @@ impl Agent {
                         }))
                         .unwrap_or_default();
 
-                        let diff_preview = crate::tools::edit_file::preview_batched(
-                            &path,
-                            &searches_replaces,
-                        )
-                        .ok();
+                        let diff_preview =
+                            crate::tools::edit_file::preview_batched(&path, &searches_replaces)
+                                .ok();
 
-                        for e in &edits {
-                            let _ = event_tx
-                                .send(AppEvent::ToolCalling {
-                                    call_id: e.tc_id.clone(),
-                                    name: "edit_file".to_string(),
-                                    arguments: display_args.clone(),
-                                })
-                                .await;
+                        if stream_to_tui {
+                            for e in &edits {
+                                let _ = event_tx
+                                    .send(AppEvent::ToolCalling {
+                                        call_id: e.tc_id.clone(),
+                                        name: "edit_file".to_string(),
+                                        arguments: display_args.clone(),
+                                    })
+                                    .await;
+                            }
                         }
                         let result = match crate::tools::edit_file::execute_batched(
                             &path,
@@ -171,32 +202,40 @@ impl Agent {
                             Err(e) => format!("Error: {}", e),
                         };
                         for e in &edits {
-                            self.history
-                                .record_tool_result(e.tc_id.clone(), result.clone());
-                            let _ = event_tx
-                                .send(AppEvent::ToolResult {
-                                    call_id: e.tc_id.clone(),
-                                    name: "edit_file".to_string(),
-                                    result: result.clone(),
-                                    diff_preview: diff_preview.clone(),
-                                })
-                                .await;
+                            if self.run_state.accumulate_history() {
+                                self.history
+                                    .record_tool_result(e.tc_id.clone(), result.clone());
+                            }
+                            if stream_to_tui {
+                                let _ = event_tx
+                                    .send(AppEvent::ToolResult {
+                                        call_id: e.tc_id.clone(),
+                                        name: "edit_file".to_string(),
+                                        result: result.clone(),
+                                        diff_preview: diff_preview.clone(),
+                                    })
+                                    .await;
+                            }
                         }
                         ProcessOutcome::Continue
                     }
                     PermissionAction::Deny => {
                         let msg = "Tool 'edit_file' denied by permission policy.".to_string();
                         for e in &edits {
-                            self.history
-                                .record_tool_result(e.tc_id.clone(), msg.clone());
-                            let _ = event_tx
-                                .send(AppEvent::ToolResult {
-                                    call_id: e.tc_id.clone(),
-                                    name: "edit_file".to_string(),
-                                    result: msg.clone(),
-                                    diff_preview: None,
-                                })
-                                .await;
+                            if self.run_state.accumulate_history() {
+                                self.history
+                                    .record_tool_result(e.tc_id.clone(), msg.clone());
+                            }
+                            if stream_to_tui {
+                                let _ = event_tx
+                                    .send(AppEvent::ToolResult {
+                                        call_id: e.tc_id.clone(),
+                                        name: "edit_file".to_string(),
+                                        result: msg.clone(),
+                                        diff_preview: None,
+                                    })
+                                    .await;
+                            }
                         }
                         ProcessOutcome::Continue
                     }
@@ -232,10 +271,12 @@ impl Agent {
                         };
 
                         for e in &edits {
-                            self.history.record_tool_result(
-                                e.tc_id.clone(),
-                                "Pending user approval...".to_string(),
-                            );
+                            if self.run_state.accumulate_history() {
+                                self.history.record_tool_result(
+                                    e.tc_id.clone(),
+                                    "Pending user approval...".to_string(),
+                                );
+                            }
                         }
 
                         self.pending_approval = Some(PendingApproval {
@@ -247,119 +288,21 @@ impl Agent {
                             preview: Self::extract_diff_preview(&preview),
                         });
 
-                        let _ = event_tx
-                            .send(AppEvent::ApprovalPending {
-                                call_id: first_id,
-                                tool_name: "edit_file".to_string(),
-                                tool_target: Some(path),
-                                preview,
-                            })
-                            .await;
+                        if stream_to_tui {
+                            let _ = event_tx
+                                .send(AppEvent::ApprovalPending {
+                                    call_id: first_id,
+                                    tool_name: "edit_file".to_string(),
+                                    tool_target: Some(path),
+                                    preview,
+                                })
+                                .await;
+                        }
 
                         ProcessOutcome::NeedApproval
                     }
                 }
             }
-        }
-    }
-
-    pub async fn step(&mut self, event_tx: &mpsc::Sender<AppEvent>) -> bool {
-        use crate::llm::{AppStreamEvent, StreamFinal};
-
-        let max_iterations = self.config.llm.max_iterations as usize;
-
-        loop {
-            if event_tx.is_closed() {
-                return false;
-            }
-            while let Some(group) = self.tool_queue.pop_front() {
-                match self.process_one_group(group, event_tx).await {
-                    ProcessOutcome::Continue => continue,
-                    ProcessOutcome::NeedApproval => return true,
-                }
-            }
-
-            if self.iteration >= max_iterations {
-                let _ = event_tx
-                    .send(AppEvent::TextDone {
-                        full_text: "[Reached maximum iterations]".to_string(),
-                    })
-                    .await;
-                let _ = event_tx.send(AppEvent::TurnComplete).await;
-                return false;
-            }
-
-            let messages = self.history.messages();
-            let system_msg = self.build_system_message().await;
-            let mut all_messages = vec![system_msg];
-            all_messages.extend_from_slice(messages);
-
-            let specs = self.all_tool_specs();
-
-            let (stream_tx, mut stream_rx) = mpsc::channel::<AppStreamEvent>(512);
-
-            let fwd_tx = event_tx.clone();
-            let drain_handle = tokio::spawn(async move {
-                while let Some(evt) = stream_rx.recv().await {
-                    match evt {
-                        AppStreamEvent::ThinkingDelta { delta } => {
-                            let _ = fwd_tx.send(AppEvent::ThinkingDelta { delta }).await;
-                        }
-                        AppStreamEvent::TextDelta { delta } => {
-                            let _ = fwd_tx.send(AppEvent::TextDelta { delta }).await;
-                        }
-                        AppStreamEvent::ToolCallStart { .. }
-                        | AppStreamEvent::ToolCallArgsDelta { .. } => {}
-                        AppStreamEvent::Done => break,
-                    }
-                }
-            });
-
-            let llm_result = self
-                .llm
-                .stream_complete(&all_messages, &specs, &stream_tx)
-                .await;
-
-            drop(stream_tx);
-            let _ = drain_handle.await;
-
-            let result = match llm_result {
-                Ok(r) => r,
-                Err(e) => {
-                    let _ = event_tx
-                        .send(AppEvent::Error {
-                            message: format!("LLM error: {}", e),
-                        })
-                        .await;
-                    return false;
-                }
-            };
-
-            self.iteration += 1;
-
-            let StreamFinal {
-                reasoning,
-                content,
-                tool_calls,
-            } = result;
-
-            self.history
-                .record_assistant(content.clone(), reasoning, tool_calls.clone());
-            self.dirty = true;
-
-            let full_text = content.unwrap_or_default();
-            let _ = event_tx
-                .send(AppEvent::TextDone {
-                    full_text: full_text.clone(),
-                })
-                .await;
-
-            let Some(tcs) = tool_calls else {
-                let _ = event_tx.send(AppEvent::TurnComplete).await;
-                return false;
-            };
-
-            self.tool_queue = group_tool_calls(tcs).into();
         }
     }
 
@@ -378,7 +321,7 @@ impl Agent {
                 }
             }
         }
-        if let Some(tool) = self.tools.get(name) {
+        if let Some(tool) = self.run_state.get_tool(name) {
             match tool.preview(args.clone()) {
                 Ok(Some(preview)) => return preview,
                 Ok(None) => {}
@@ -401,7 +344,6 @@ impl Agent {
         if !first_line.starts_with("---") && !first_line.starts_with("diff ") {
             return None;
         }
-        // Strip trailing non-diff summary lines (e.g. "Replaced 1 occurrence in foo.rs")
         let all: Vec<&str> = preview.lines().collect();
         let diff_end = all
             .iter()
@@ -420,6 +362,125 @@ impl Agent {
             .unwrap_or(0);
         Some(all[..=diff_end].join("\n"))
     }
+}
+
+impl Agent {
+    pub async fn step(&mut self, event_tx: &mpsc::Sender<AppEvent>) -> bool {
+        use crate::llm::{AppStreamEvent, StreamFinal};
+
+        let max_iterations = self.max_iterations();
+        let stream_to_tui = self.run_state.stream_to_tui();
+
+        loop {
+            if event_tx.is_closed() {
+                return false;
+            }
+            while let Some(group) = self.tool_queue.pop_front() {
+                match self.process_one_group(group, event_tx).await {
+                    ProcessOutcome::Continue => continue,
+                    ProcessOutcome::NeedApproval => return true,
+                }
+            }
+
+            if self.iteration >= max_iterations {
+                if stream_to_tui {
+                    let _ = event_tx
+                        .send(AppEvent::TextDone {
+                            full_text: "[Reached maximum iterations]".to_string(),
+                        })
+                        .await;
+                    let _ = event_tx.send(AppEvent::TurnComplete).await;
+                }
+                return false;
+            }
+
+            let system_msg = self.build_system_message();
+            let mut all_messages = vec![system_msg];
+            if self.run_state.include_history() {
+                all_messages.extend(self.history.messages().to_vec());
+            }
+
+            let specs = self.all_tool_specs();
+
+            let (stream_tx, mut stream_rx) = mpsc::channel::<AppStreamEvent>(512);
+
+            let fwd_tx = if stream_to_tui {
+                Some(event_tx.clone())
+            } else {
+                None
+            };
+            let drain_handle = tokio::spawn(async move {
+                while let Some(evt) = stream_rx.recv().await {
+                    if let Some(ref tx) = fwd_tx {
+                        match evt {
+                            AppStreamEvent::ThinkingDelta { delta } => {
+                                let _ = tx.send(AppEvent::ThinkingDelta { delta }).await;
+                            }
+                            AppStreamEvent::TextDelta { delta } => {
+                                let _ = tx.send(AppEvent::TextDelta { delta }).await;
+                            }
+                            AppStreamEvent::ToolCallStart { .. }
+                            | AppStreamEvent::ToolCallArgsDelta { .. } => {}
+                            AppStreamEvent::Done => break,
+                        }
+                    } else if matches!(evt, AppStreamEvent::Done) {
+                        break;
+                    }
+                }
+            });
+
+            let llm_result = self
+                .llm
+                .stream_complete(&all_messages, &specs, &stream_tx)
+                .await;
+
+            drop(stream_tx);
+            let _ = drain_handle.await;
+
+            let result = match llm_result {
+                Ok(r) => r,
+                Err(e) => {
+                    if stream_to_tui {
+                        let _ = event_tx
+                            .send(AppEvent::Error {
+                                message: format!("LLM error: {}", e),
+                            })
+                            .await;
+                    } else {
+                        tracing::error!("LLM error: {}", e);
+                    }
+                    return false;
+                }
+            };
+
+            self.iteration += 1;
+
+            let StreamFinal {
+                reasoning,
+                content,
+                tool_calls,
+            } = result;
+
+            if self.run_state.accumulate_history() {
+                self.history
+                    .record_assistant(content.clone(), reasoning, tool_calls.clone());
+                self.dirty = true;
+            }
+
+            let Some(tcs) = tool_calls else {
+                self.run_state.on_turn_complete(content.as_deref());
+                if stream_to_tui {
+                    let full_text = content.unwrap_or_default();
+                    let _ = event_tx.send(AppEvent::TextDone { full_text }).await;
+                    let _ = event_tx.send(AppEvent::TurnComplete).await;
+                }
+                return false;
+            };
+
+            self.run_state.on_tool_calls(tcs.len());
+            self.tool_queue = group_tool_calls(tcs).into();
+        }
+    }
 
     pub async fn approve_pending(&mut self, event_tx: &mpsc::Sender<AppEvent>) -> bool {
         let pending = match self.pending_approval.take() {
@@ -427,14 +488,18 @@ impl Agent {
             None => return false,
         };
 
-        for tc_id in &pending.tc_ids {
-            let _ = event_tx
-                .send(AppEvent::ToolCalling {
-                    call_id: tc_id.clone(),
-                    name: pending.tool_name.clone(),
-                    arguments: pending.display_args.clone(),
-                })
-                .await;
+        let stream_to_tui = self.run_state.stream_to_tui();
+
+        if stream_to_tui {
+            for tc_id in &pending.tc_ids {
+                let _ = event_tx
+                    .send(AppEvent::ToolCalling {
+                        call_id: tc_id.clone(),
+                        name: pending.tool_name.clone(),
+                        arguments: pending.display_args.clone(),
+                    })
+                    .await;
+            }
         }
 
         let result = if let Some(ref batched) = pending.batched_edits {
@@ -452,15 +517,19 @@ impl Agent {
         };
 
         for tc_id in &pending.tc_ids {
-            self.history.update_tool_result(tc_id, result.clone());
-            let _ = event_tx
-                .send(AppEvent::ToolResult {
-                    call_id: tc_id.clone(),
-                    name: pending.tool_name.clone(),
-                    result: result.clone(),
-                    diff_preview: pending.preview.clone(),
-                })
-                .await;
+            if self.run_state.accumulate_history() {
+                self.history.update_tool_result(tc_id, result.clone());
+            }
+            if stream_to_tui {
+                let _ = event_tx
+                    .send(AppEvent::ToolResult {
+                        call_id: tc_id.clone(),
+                        name: pending.tool_name.clone(),
+                        result: result.clone(),
+                        diff_preview: pending.preview.clone(),
+                    })
+                    .await;
+            }
         }
         true
     }
@@ -479,14 +548,19 @@ impl Agent {
         } else {
             format!("User rejected this operation. Feedback: {}", feedback)
         };
+        let stream_to_tui = self.run_state.stream_to_tui();
         for tc_id in &pending.tc_ids {
-            self.history.update_tool_result(tc_id, msg.clone());
-            let _ = event_tx
-                .send(AppEvent::ToolRejected {
-                    call_id: tc_id.clone(),
-                    feedback: msg.clone(),
-                })
-                .await;
+            if self.run_state.accumulate_history() {
+                self.history.update_tool_result(tc_id, msg.clone());
+            }
+            if stream_to_tui {
+                let _ = event_tx
+                    .send(AppEvent::ToolRejected {
+                        call_id: tc_id.clone(),
+                        feedback: msg.clone(),
+                    })
+                    .await;
+            }
         }
         true
     }
