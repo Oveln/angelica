@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::permission::PermissionConfig;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct Config {
     #[serde(default)]
     pub llm: LlmConfig,
@@ -29,9 +29,8 @@ impl Config {
         Ok(config)
     }
 
-    pub fn from_str(s: &str) -> anyhow::Result<Self> {
-        let config: Config = toml::from_str(s)?;
-        Ok(config)
+    pub fn parse_toml(s: &str) -> anyhow::Result<Self> {
+        Ok(toml::from_str(s)?)
     }
 
     pub fn resolve_paths(&mut self, base: &Path) {
@@ -55,17 +54,11 @@ impl Config {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            llm: LlmConfig::default(),
-            memory: MemoryConfig::default(),
-            mcp: McpConfig::default(),
-            skills: SkillsConfig::default(),
-            permission: PermissionConfig::default(),
-            state: StateConfig::default(),
-            fatigue: FatigueConfig::default(),
-        }
+impl std::str::FromStr for Config {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse_toml(s)
     }
 }
 
@@ -365,7 +358,7 @@ thinking = false
 memory_path = "data/mem.md"
 max_file_size_kb = 64
 "#;
-        let config = Config::from_str(toml).unwrap();
+        let config = Config::parse_toml(toml).unwrap();
         assert_eq!(config.llm.model, "deepseek-v4-pro");
         assert!(!config.llm.thinking);
         assert_eq!(config.memory.max_file_size_kb, 64);
@@ -378,7 +371,7 @@ max_file_size_kb = 64
 agent_memory_path = "data/old_memory.md"
 user_profile_path = "data/old_profile.md"
 "#;
-        let config = Config::from_str(toml).unwrap();
+        let config = Config::parse_toml(toml).unwrap();
         assert_eq!(config.memory.memory_path, "data/old_memory.md");
         assert_eq!(config.memory.profile_path, "data/old_profile.md");
     }

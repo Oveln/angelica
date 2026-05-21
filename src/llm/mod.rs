@@ -2,6 +2,7 @@ pub mod patch;
 pub mod types;
 
 use futures::StreamExt;
+use genai::Client;
 use genai::chat::{
     ChatMessage as GenaiMessage, ChatOptions, ChatRequest, ChatStreamEvent, ContentPart,
     MessageContent, ReasoningEffort, StreamChunk, Tool as GenaiTool, ToolCall as GenaiToolCall,
@@ -10,7 +11,6 @@ use genai::chat::{
 use genai::resolver::{AuthData, AuthResolver, Endpoint, ServiceTargetResolver};
 use std::collections::HashMap;
 use std::sync::Arc;
-use genai::Client;
 
 use crate::config::{LlmConfig, ProfileConfig};
 use crate::llm::types::*;
@@ -129,7 +129,11 @@ impl LlmClient {
             .await
             .map_err(|e| anyhow::anyhow!("LLM error: {}", e))?;
 
-        let content = response.content.clone().into_first_text().unwrap_or_default();
+        let content = response
+            .content
+            .clone()
+            .into_first_text()
+            .unwrap_or_default();
         let tool_calls: Vec<ToolCall> = response
             .content
             .tool_calls()
@@ -157,7 +161,10 @@ impl LlmClient {
         &self,
         messages: &[ChatMessage],
         options: RequestOptions,
-    ) -> anyhow::Result<(tokio::task::JoinHandle<anyhow::Result<LlmResponse>>, tokio::sync::mpsc::Receiver<LlmStreamEvent>)> {
+    ) -> anyhow::Result<(
+        tokio::task::JoinHandle<anyhow::Result<LlmResponse>>,
+        tokio::sync::mpsc::Receiver<LlmStreamEvent>,
+    )> {
         let profile = self.resolve_profile(options.profile.as_deref()).clone();
         let client = self.clients.get(&profile.client_key).unwrap().clone(); // Arc clone
         let genai_messages = convert_messages(messages)?;
@@ -201,17 +208,13 @@ impl LlmClient {
                 match event {
                     ChatStreamEvent::Chunk(StreamChunk { content: text }) if !text.is_empty() => {
                         content_buf.push_str(&text);
-                        let _ = tx
-                            .send(LlmStreamEvent::TextDelta { delta: text })
-                            .await;
+                        let _ = tx.send(LlmStreamEvent::TextDelta { delta: text }).await;
                     }
                     ChatStreamEvent::ReasoningChunk(StreamChunk { content: text })
                         if !text.is_empty() =>
                     {
                         thinking_buf.push_str(&text);
-                        let _ = tx
-                            .send(LlmStreamEvent::ThinkingDelta { delta: text })
-                            .await;
+                        let _ = tx.send(LlmStreamEvent::ThinkingDelta { delta: text }).await;
                     }
                     ChatStreamEvent::ToolCallChunk(_) => {}
                     ChatStreamEvent::End(end) => {
@@ -293,7 +296,10 @@ fn make_client_key(base_url: &str, api_key: &str) -> String {
 }
 
 fn resolve_api_key(profile: &ProfileConfig, default: &str) -> String {
-    profile.api_key.clone().unwrap_or_else(|| default.to_string())
+    profile
+        .api_key
+        .clone()
+        .unwrap_or_else(|| default.to_string())
 }
 
 fn build_chat_options(
@@ -314,9 +320,7 @@ fn build_chat_options(
         .with_capture_tool_calls(true);
 
     if thinking {
-        let effort = match reasoning_effort_override
-            .unwrap_or(&profile.reasoning_effort)
-        {
+        let effort = match reasoning_effort_override.unwrap_or(&profile.reasoning_effort) {
             "low" => ReasoningEffort::Low,
             "medium" => ReasoningEffort::Medium,
             _ => ReasoningEffort::High,
@@ -356,8 +360,7 @@ fn convert_tool_call(tc: GenaiToolCall) -> anyhow::Result<ToolCall> {
         id: tc.call_id,
         function: FunctionCall {
             name: tc.fn_name,
-            arguments: serde_json::to_string(&tc.fn_arguments)
-                .unwrap_or_else(|_| "{}".to_string()),
+            arguments: serde_json::to_string(&tc.fn_arguments).unwrap_or_else(|_| "{}".to_string()),
         },
     })
 }
@@ -367,9 +370,7 @@ fn convert_message(msg: &ChatMessage) -> anyhow::Result<GenaiMessage> {
         "system" => Ok(GenaiMessage::system(
             msg.content.clone().unwrap_or_default(),
         )),
-        "user" => Ok(GenaiMessage::user(
-            msg.content.clone().unwrap_or_default(),
-        )),
+        "user" => Ok(GenaiMessage::user(msg.content.clone().unwrap_or_default())),
         "assistant" => {
             if let Some(tcs) = &msg.tool_calls {
                 let genai_tcs: Vec<GenaiToolCall> = tcs
@@ -385,10 +386,10 @@ fn convert_message(msg: &ChatMessage) -> anyhow::Result<GenaiMessage> {
                     .collect::<anyhow::Result<Vec<_>>>()?;
 
                 let mut parts: Vec<ContentPart> = Vec::new();
-                if let Some(text) = &msg.content {
-                    if !text.is_empty() {
-                        parts.push(ContentPart::Text(text.clone()));
-                    }
+                if let Some(text) = &msg.content
+                    && !text.is_empty()
+                {
+                    parts.push(ContentPart::Text(text.clone()));
                 }
                 parts.extend(genai_tcs.into_iter().map(ContentPart::ToolCall));
 

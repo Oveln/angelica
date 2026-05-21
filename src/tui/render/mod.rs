@@ -289,29 +289,30 @@ fn render_assistant_message(
 ) {
     let theme = state.theme();
 
-    if let Some(think) = thinking {
-        if state.display.thinking_visible && !think.is_empty() {
-            let glyph_style = Style::default()
-                .fg(theme.assistant)
-                .add_modifier(Modifier::BOLD);
-            lines.push(Line::from(vec![
-                Span::styled(ASSISTANT_GLYPH.to_string(), glyph_style),
-                Span::styled(
-                    " thinking\u{2026}",
-                    Style::default()
-                        .fg(theme.thinking)
-                        .add_modifier(Modifier::ITALIC),
-                ),
-            ]));
-            let think_w = max_w.saturating_sub(UnicodeWidthStr::width(THINKING_RAIL));
-            let think_style = Style::default().fg(theme.thinking);
-            for think_line in think.lines() {
-                for chunk in wrap_str(think_line, think_w) {
-                    lines.push(Line::from(Span::styled(
-                        format!("{}{}", THINKING_RAIL, chunk),
-                        think_style,
-                    )));
-                }
+    if let Some(think) = thinking
+        && state.display.thinking_visible
+        && !think.is_empty()
+    {
+        let glyph_style = Style::default()
+            .fg(theme.assistant)
+            .add_modifier(Modifier::BOLD);
+        lines.push(Line::from(vec![
+            Span::styled(ASSISTANT_GLYPH.to_string(), glyph_style),
+            Span::styled(
+                " thinking\u{2026}",
+                Style::default()
+                    .fg(theme.thinking)
+                    .add_modifier(Modifier::ITALIC),
+            ),
+        ]));
+        let think_w = max_w.saturating_sub(UnicodeWidthStr::width(THINKING_RAIL));
+        let think_style = Style::default().fg(theme.thinking);
+        for think_line in think.lines() {
+            for chunk in wrap_str(think_line, think_w) {
+                lines.push(Line::from(Span::styled(
+                    format!("{}{}", THINKING_RAIL, chunk),
+                    think_style,
+                )));
             }
         }
     }

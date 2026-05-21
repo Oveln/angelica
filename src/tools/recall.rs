@@ -67,10 +67,10 @@ impl Tool for RecallTool {
         let keyword_lower = keyword.to_lowercase();
 
         // Search current conversation
-        if self.conversation_path.exists() {
-            if let Ok(matches) = self.search_jsonl(&self.conversation_path, &keyword_lower, limit) {
-                results.extend(matches);
-            }
+        if self.conversation_path.exists()
+            && let Ok(matches) = self.search_jsonl(&self.conversation_path, &keyword_lower, limit)
+        {
+            results.extend(matches);
         }
 
         // Search history folders
@@ -79,19 +79,18 @@ impl Tool for RecallTool {
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
                 .collect();
-            entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+            entries.sort_by_cached_key(|entry| std::cmp::Reverse(entry.file_name()));
 
             for entry in entries {
                 if results.len() >= limit {
                     break;
                 }
                 let conv_path = entry.path().join("conversation.jsonl");
-                if conv_path.exists() {
-                    if let Ok(matches) =
+                if conv_path.exists()
+                    && let Ok(matches) =
                         self.search_jsonl(&conv_path, &keyword_lower, limit - results.len())
-                    {
-                        results.extend(matches);
-                    }
+                {
+                    results.extend(matches);
                 }
             }
         }

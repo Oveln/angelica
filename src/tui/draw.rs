@@ -48,10 +48,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
     let msgs_area = if show_panel {
         let cols = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Min(20),
-                Constraint::Length(STATUS_PANEL_WIDTH),
-            ])
+            .constraints([Constraint::Min(20), Constraint::Length(STATUS_PANEL_WIDTH)])
             .split(outer[0]);
         draw_status_panel(f, &theme, cols[1], state);
         cols[0]
@@ -132,9 +129,7 @@ fn draw_welcome(f: &mut Frame, theme: &Theme, area: Rect) {
     let logo = logo_lines();
     let logo_height = logo.len() as u16;
     let tagline = APP_TAGLINE;
-    let tips = [
-        "Press any key to wake up",
-    ];
+    let tips = ["Press any key to wake up"];
 
     let total_content = logo_height + 1 + 1 + 1 + tips.len() as u16;
     let top_pad = area.height.saturating_sub(total_content) / 2;

@@ -76,25 +76,25 @@ pub async fn handle_key(
             };
         }
         KeyCode::Up => {
-            if let AppMode::SlashMenu(ref mut sm) = state.mode {
-                if sm.selected > 0 {
-                    sm.selected -= 1;
-                }
+            if let AppMode::SlashMenu(ref mut sm) = state.mode
+                && sm.selected > 0
+            {
+                sm.selected -= 1;
             }
         }
         KeyCode::Down => {
-            if let AppMode::SlashMenu(ref mut sm) = state.mode {
-                if sm.selected + 1 < sm.matched.len() {
-                    sm.selected += 1;
-                }
+            if let AppMode::SlashMenu(ref mut sm) = state.mode
+                && sm.selected + 1 < sm.matched.len()
+            {
+                sm.selected += 1;
             }
         }
         KeyCode::Tab => {
-            if let AppMode::SlashMenu(ref mut sm) = state.mode {
-                if let Some(cmd) = sm.selected_cmd() {
-                    state.input.set(format!("/{}", cmd.name));
-                    sm.update_matches(state.input.as_str());
-                }
+            if let AppMode::SlashMenu(ref mut sm) = state.mode
+                && let Some(cmd) = sm.selected_cmd()
+            {
+                state.input.set(format!("/{}", cmd.name));
+                sm.update_matches(state.input.as_str());
             }
         }
         KeyCode::Enter => {

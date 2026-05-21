@@ -46,6 +46,8 @@ pub mod group;
 pub mod history;
 pub mod modes;
 pub mod run;
+mod tooling;
+mod turn;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -185,7 +187,12 @@ impl Agent {
 
     pub fn push_user_message(&mut self, content: &str) {
         // Ensure system prompt is the first message in history
-        if !self.history.messages().iter().any(|m| m.role == "system" && m.name.is_none()) {
+        if !self
+            .history
+            .messages()
+            .iter()
+            .any(|m| m.role == "system" && m.name.is_none())
+        {
             let system_msg = self.build_system_message();
             self.history.push(system_msg);
         }

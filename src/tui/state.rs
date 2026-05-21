@@ -256,22 +256,20 @@ impl AppState {
                             }
                         }
                         "tool" => {
-                            if let Some(last_tool) = self
+                            if let Some(DisplayMessage::Tool { result, .. }) = self
                                 .messages
                                 .iter_mut()
                                 .rev()
                                 .find(|m| matches!(m, DisplayMessage::Tool { call_id, .. } if *call_id == msg.tool_call_id.as_deref().unwrap_or("")))
                             {
-                                if let DisplayMessage::Tool { result, .. } = last_tool {
-                                    *result = Some(
-                                        msg.content
-                                            .as_deref()
-                                            .unwrap_or("")
-                                            .chars()
-                                            .take(200)
-                                            .collect(),
-                                    );
-                                }
+                                *result = Some(
+                                    msg.content
+                                        .as_deref()
+                                        .unwrap_or("")
+                                        .chars()
+                                        .take(200)
+                                        .collect(),
+                                );
                             }
                         }
                         _ => {}

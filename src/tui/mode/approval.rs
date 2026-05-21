@@ -69,10 +69,8 @@ pub async fn handle_key(
                 let _ = tx.send(UserAction::Quit).await;
                 return;
             }
-            KeyCode::Esc => {
-                if editing {
-                    a.selected = ApprovalChoice::Reject;
-                }
+            KeyCode::Esc if editing => {
+                a.selected = ApprovalChoice::Reject;
             }
             KeyCode::Up => {
                 state.scroll.up(3);

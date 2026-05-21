@@ -178,24 +178,25 @@ async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent
     }
 
     // Phase 6: git commit sleep artifacts
-    if let Err(e) = crate::data_git::commit_all(&data_dir, &format!("sleep done: {}", snapshot_ts)) {
+    if let Err(e) = crate::data_git::commit_all(&data_dir, &format!("sleep done: {}", snapshot_ts))
+    {
         tracing::error!("Failed to commit sleep data: {}", e);
     }
 
     // Phase 7: reset state — clear fatigue and conversation after sleep completes
     {
         let state_path = std::path::PathBuf::from(&config.state.path);
-        if state_path.exists() {
-            if let Err(e) = std::fs::remove_file(&state_path) {
-                tracing::error!("Failed to remove state file: {}", e);
-            }
+        if state_path.exists()
+            && let Err(e) = std::fs::remove_file(&state_path)
+        {
+            tracing::error!("Failed to remove state file: {}", e);
         }
 
         let conversation_path = std::path::PathBuf::from(&config.state.conversation_path);
-        if conversation_path.exists() {
-            if let Err(e) = std::fs::write(&conversation_path, "") {
-                tracing::error!("Failed to clear conversation history: {}", e);
-            }
+        if conversation_path.exists()
+            && let Err(e) = std::fs::write(&conversation_path, "")
+        {
+            tracing::error!("Failed to clear conversation history: {}", e);
         }
     }
 

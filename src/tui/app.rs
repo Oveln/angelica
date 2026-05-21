@@ -51,11 +51,11 @@ pub async fn run_tui(
                         if matches!(event, AppEvent::Error { .. }) && state.messages.is_empty() {
                             state.should_quit = true;
                         }
-                        if matches!(event, AppEvent::TurnComplete) {
-                            if let Some(msg) = state.queued_messages.pop_front() {
-                                state.add_chat("user", &msg, None);
-                                let _ = user_action_tx.send(UserAction::SendMessage { content: msg }).await;
-                            }
+                        if matches!(event, AppEvent::TurnComplete)
+                            && let Some(msg) = state.queued_messages.pop_front()
+                        {
+                            state.add_chat("user", &msg, None);
+                            let _ = user_action_tx.send(UserAction::SendMessage { content: msg }).await;
                         }
                     }
                     None => break,
@@ -63,10 +63,10 @@ pub async fn run_tui(
             }
             maybe_event = reader.next() => {
                 match maybe_event {
-                    Some(Ok(crossterm::event::Event::Key(key))) => {
-                        if key.kind == crossterm::event::KeyEventKind::Press {
-                            handle_key(&mut state, key, &user_action_tx).await;
-                        }
+                    Some(Ok(crossterm::event::Event::Key(key)))
+                        if key.kind == crossterm::event::KeyEventKind::Press =>
+                    {
+                        handle_key(&mut state, key, &user_action_tx).await;
                     }
                     Some(Ok(crossterm::event::Event::Mouse(mouse))) => {
                         match mouse.kind {
@@ -129,7 +129,7 @@ pub async fn run_tui(
 const BASE64_TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 fn base64_encode(input: &[u8]) -> String {
-    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };

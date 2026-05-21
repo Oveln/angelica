@@ -117,8 +117,7 @@ pub(super) fn render_diff_lines(
             continue;
         }
 
-        if raw.starts_with(' ') {
-            let content = &raw[1..];
+        if let Some(content) = raw.strip_prefix(' ') {
             let gutter_text = format!(" {}   ", format_line_no(new_line));
             let card_w = UnicodeWidthStr::width(CARD_MID);
             let gutter_w = UnicodeWidthStr::width(gutter_text.as_str());

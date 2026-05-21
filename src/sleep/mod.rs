@@ -19,10 +19,10 @@ pub fn build_conversation_text(messages: &[ChatMessage]) -> String {
                 let name = msg.name.as_deref().unwrap_or("");
                 if name == "context" {
                     // Skip all context messages except the last one
-                    if last_context_idx.is_some_and(|idx| std::ptr::eq(msg, &messages[idx])) {
-                        if let Some(content) = &msg.content {
-                            text.push_str(&format!("[context] {}\n", content));
-                        }
+                    if last_context_idx.is_some_and(|idx| std::ptr::eq(msg, &messages[idx]))
+                        && let Some(content) = &msg.content
+                    {
+                        text.push_str(&format!("[context] {}\n", content));
                     }
                 }
                 // Skip system prompt messages
