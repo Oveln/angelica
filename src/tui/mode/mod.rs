@@ -151,6 +151,10 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
                     None,
                 );
             }
+            "sleep" => {
+                state.add_chat("system", "Falling asleep...", None);
+                let _ = tx.send(UserAction::ForceSleep).await;
+            }
             _ => {
                 state.add_chat("system", &format!("Unknown command: /{}", cmd_name), None);
             }
