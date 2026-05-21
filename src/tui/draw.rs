@@ -5,7 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
-        StatefulWidget,
+        Sparkline, StatefulWidget,
     },
 };
 use unicode_width::UnicodeWidthStr;
@@ -15,7 +15,7 @@ use super::render::build_all_lines;
 use super::state::AppState;
 use super::theme::{APP_NAME, APP_TAGLINE, PROMPT, Theme, logo_lines};
 
-const STATUS_PANEL_WIDTH: u16 = 22;
+const STATUS_PANEL_WIDTH: u16 = 26;
 
 pub fn draw(f: &mut Frame, state: &mut AppState) {
     let theme = *state.theme();
@@ -43,7 +43,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         ])
         .split(f.area());
 
-    let show_panel = !matches!(state.mode, AppMode::Welcome) && f.area().width > 60;
+    let show_panel = !matches!(state.mode, AppMode::Welcome) && f.area().width > 64;
 
     let msgs_area = if show_panel {
         let cols = Layout::default()
@@ -102,6 +102,10 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
 
     if matches!(state.mode, AppMode::SlashMenu(_)) {
         mode::slash::draw(f, state, f.area(), &theme);
+    }
+
+    if matches!(state.mode, AppMode::UsageStats) {
+        draw_usage_stats(f, state, f.area(), &theme);
     }
 
     if !state.queued_messages.is_empty() {
@@ -186,14 +190,14 @@ fn draw_welcome(f: &mut Frame, theme: &Theme, area: Rect) {
 }
 
 fn draw_status_panel(f: &mut Frame, theme: &Theme, area: Rect, state: &AppState) {
-    let fatigue_bar_width = (area.width as usize).saturating_sub(4);
-    let filled = (state.fatigue.fatigue * fatigue_bar_width as f64).round() as usize;
-    let empty = fatigue_bar_width.saturating_sub(filled);
+    let bar_width = (area.width as usize).saturating_sub(4);
+    let filled = (state.fatigue.fatigue * bar_width as f64).round() as usize;
+    let empty = bar_width.saturating_sub(filled);
     let bar = format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty));
 
     let fatigue_pct = format!("{:.0}%", state.fatigue.fatigue * 100.0);
 
-    let lines = vec![
+    let mut lines = vec![
         Line::from(Span::styled(
             " \u{25CF} \u{72B6}\u{6001}",
             Style::default()
@@ -213,7 +217,7 @@ fn draw_status_panel(f: &mut Frame, theme: &Theme, area: Rect, state: &AppState)
         Line::from(Span::styled(
             format!(
                 " {}\u{258E}{}",
-                " ".repeat(fatigue_bar_width.saturating_sub(fatigue_pct.len()) / 2),
+                " ".repeat(bar_width.saturating_sub(fatigue_pct.len()) / 2),
                 fatigue_pct
             ),
             Style::default().fg(theme.status_muted),
@@ -227,7 +231,77 @@ fn draw_status_panel(f: &mut Frame, theme: &Theme, area: Rect, state: &AppState)
             format!(" \u{2699} {} calls", state.fatigue.tool_calls),
             Style::default().fg(theme.status_muted),
         )),
+        Line::from(""),
+        Line::from(Span::styled(
+            " \u{25C6} \u{7528}\u{91CF}",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
     ];
+
+    let u = &state.usage;
+    let prompt_k = format_tokens(u.prompt_tokens);
+    let completion_k = format_tokens(u.completion_tokens);
+    let total_k = format_tokens(u.total_tokens);
+
+    lines.push(Line::from(Span::styled(
+        format!(" in:  {}k", prompt_k),
+        Style::default().fg(theme.status_muted),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!(" out: {}k", completion_k),
+        Style::default().fg(theme.status_muted),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!(" sum: {}k", total_k),
+        Style::default().fg(theme.status_muted),
+    )));
+    lines.push(Line::from(""));
+
+    if u.cache_hit_tokens > 0 || u.cache_miss_tokens > 0 {
+        let hit_k = format_tokens(u.cache_hit_tokens);
+        let miss_k = format_tokens(u.cache_miss_tokens);
+        let rate_pct = format!("{:.0}%", u.cache_hit_rate() * 100.0);
+        let cache_bar_filled = if u.cache_total() > 0 {
+            (u.cache_hit_rate() * bar_width as f64).round() as usize
+        } else {
+            0
+        };
+        let cache_bar_empty = bar_width.saturating_sub(cache_bar_filled);
+        let cache_bar = format!(
+            "{}{}",
+            "\u{2588}".repeat(cache_bar_filled),
+            "\u{2591}".repeat(cache_bar_empty)
+        );
+
+        lines.push(Line::from(Span::styled(
+            format!(" hit:  {}k", hit_k),
+            Style::default().fg(theme.status_muted),
+        )));
+        lines.push(Line::from(Span::styled(
+            format!(" miss: {}k", miss_k),
+            Style::default().fg(theme.status_muted),
+        )));
+        lines.push(Line::from(Span::styled(
+            format!(" {}", cache_bar),
+            Style::default().fg(theme.muted),
+        )));
+        lines.push(Line::from(Span::styled(
+            format!(
+                " {}\u{258E}{}",
+                " ".repeat(bar_width.saturating_sub(rate_pct.len()) / 2),
+                rate_pct
+            ),
+            Style::default().fg(theme.status_muted),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            " cache: --",
+            Style::default().fg(theme.status_muted),
+        )));
+    }
 
     let panel = Paragraph::new(lines).block(
         Block::default()
@@ -244,10 +318,12 @@ fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
         AppMode::Streaming => "\u{25CF} streaming",
         AppMode::Approval(_) => "\u{25D0} approval",
         AppMode::SlashMenu(_) => "\u{25CB} idle",
+        AppMode::UsageStats => "\u{25C6} usage",
     };
     let mode_style = match &state.mode {
         AppMode::Streaming => Style::default().fg(theme.success),
         AppMode::Approval(_) => Style::default().fg(theme.warning),
+        AppMode::UsageStats => Style::default().fg(theme.accent),
         _ => Style::default().fg(theme.status_muted),
     };
 
@@ -417,4 +493,242 @@ fn draw_input(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
 
     let display_col = state.input.display_cursor_col();
     f.set_cursor_position((area.x + prompt_width + display_col, area.y + 1));
+}
+
+fn format_tokens(tokens: u64) -> String {
+    if tokens >= 1_000_000 {
+        format!("{:.1}M", tokens as f64 / 1_000_000.0)
+    } else {
+        format!("{:.1}", tokens as f64 / 1_000.0)
+    }
+}
+
+fn draw_usage_stats(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
+    let sessions = state.cached_usage_sessions.as_deref().unwrap_or_default();
+
+    let popup_area = centered_rect(area, 70, 80);
+    // Clear slightly wider than popup to avoid CJK full-width characters
+    // straddling the border from the background
+    let clear_area = Rect {
+        x: popup_area.x.saturating_sub(1),
+        y: popup_area.y,
+        width: popup_area.width.saturating_add(2).min(area.width),
+        height: popup_area.height,
+    };
+    f.render_widget(Clear, clear_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.accent))
+        .title(Span::styled(
+            " Usage Statistics ",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .title_style(Style::default().fg(theme.accent));
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+
+    if sessions.is_empty() {
+        let empty = Paragraph::new(Line::from(Span::styled(
+            "No usage data yet. Start a conversation to see stats.",
+            Style::default().fg(theme.muted),
+        )));
+        f.render_widget(empty, inner);
+        return;
+    }
+
+    let chart_data_count = 30usize;
+
+    // Split into header + sparkline charts + table
+    let chart_height = 3u16; // 3 sparklines
+    let header_height = 2u16;
+    let remaining = inner
+        .height
+        .saturating_sub(header_height + chart_height * 3);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(header_height),
+            Constraint::Length(chart_height),
+            Constraint::Length(chart_height),
+            Constraint::Length(chart_height),
+            Constraint::Min(0),
+        ])
+        .split(inner);
+
+    // Header
+    let header_lines = vec![
+        Line::from(Span::styled(
+            format!(" {} sessions loaded  |  Esc to close", sessions.len()),
+            Style::default().fg(theme.status_fg),
+        )),
+        Line::from(""),
+    ];
+    f.render_widget(Paragraph::new(header_lines), chunks[0]);
+
+    // Prepare chart data: last N sessions
+    let recent: Vec<_> = sessions
+        .iter()
+        .rev()
+        .take(chart_data_count)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+
+    // Sparkline 1: Total tokens per session
+    let total_data: Vec<u64> = recent.iter().map(|s| s.total_tokens).collect();
+    let max_total = total_data.iter().copied().max().unwrap_or(1);
+    let spark1 = Sparkline::default()
+        .data(&total_data)
+        .style(Style::default().fg(theme.accent))
+        .max(max_total);
+    let spark1_block = Block::default()
+        .title(Span::styled(
+            format!(" Total tokens (max {}k)", max_total / 1000),
+            Style::default().fg(theme.status_muted),
+        ))
+        .borders(Borders::NONE);
+    f.render_widget(spark1, spark1_block.inner(chunks[1]));
+    f.render_widget(spark1_block, chunks[1]);
+
+    // Sparkline 2: Cache hit rate per session (as percentage * 100)
+    let hit_data: Vec<u64> = recent
+        .iter()
+        .map(|s| (s.cache_hit_rate() * 100.0).round() as u64)
+        .collect();
+    let spark2 = Sparkline::default()
+        .data(&hit_data)
+        .style(Style::default().fg(theme.success))
+        .max(100);
+    let spark2_block = Block::default()
+        .title(Span::styled(
+            " Cache hit rate %",
+            Style::default().fg(theme.status_muted),
+        ))
+        .borders(Borders::NONE);
+    f.render_widget(spark2, spark2_block.inner(chunks[2]));
+    f.render_widget(spark2_block, chunks[2]);
+
+    // Sparkline 3: Completion tokens per session
+    let comp_data: Vec<u64> = recent.iter().map(|s| s.completion_tokens).collect();
+    let max_comp = comp_data.iter().copied().max().unwrap_or(1);
+    let spark3 = Sparkline::default()
+        .data(&comp_data)
+        .style(Style::default().fg(theme.warning))
+        .max(max_comp);
+    let spark3_block = Block::default()
+        .title(Span::styled(
+            format!(" Output tokens (max {}k)", max_comp / 1000),
+            Style::default().fg(theme.status_muted),
+        ))
+        .borders(Borders::NONE);
+    f.render_widget(spark3, spark3_block.inner(chunks[3]));
+    f.render_widget(spark3_block, chunks[3]);
+
+    // Session table
+    let max_rows = remaining as usize;
+    let display_sessions: Vec<_> = sessions.iter().rev().take(max_rows).collect();
+
+    let mut table_lines: Vec<Line> = Vec::new();
+    table_lines.push(Line::from(vec![
+        Span::styled(
+            format!(" {:<5}", "#"),
+            Style::default()
+                .fg(theme.status_muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {:<6}", "Type"),
+            Style::default()
+                .fg(theme.status_muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {:>10}", "In"),
+            Style::default()
+                .fg(theme.status_muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {:>10}", "Out"),
+            Style::default()
+                .fg(theme.status_muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {:>10}", "Total"),
+            Style::default()
+                .fg(theme.status_muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {:>6}", "Iters"),
+            Style::default()
+                .fg(theme.status_muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {:>6}", "Cache%"),
+            Style::default()
+                .fg(theme.status_muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  {}", "Time"),
+            Style::default()
+                .fg(theme.status_muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+
+    for (i, s) in display_sessions.iter().enumerate() {
+        let short_time = s
+            .start_time
+            .get(..16)
+            .unwrap_or(&s.start_time)
+            .replace('T', " ");
+        let scope_label = if s.scope == crate::usage::UsageScope::Awake {
+            "\u{25CF} awake"
+        } else {
+            "\u{25CB} sleep"
+        };
+        let scope_style = if s.scope == crate::usage::UsageScope::Awake {
+            Style::default().fg(theme.success)
+        } else {
+            Style::default().fg(theme.status_muted)
+        };
+        let row_style = if i % 2 == 0 {
+            Style::default()
+        } else {
+            Style::default().bg(theme.status_bg)
+        };
+
+        table_lines.push(Line::from(vec![
+            Span::styled(format!(" {:<5}", i + 1), row_style),
+            Span::styled(format!(" {:<6}", scope_label), scope_style),
+            Span::styled(format!(" {:>9}k", s.prompt_tokens / 1000), row_style),
+            Span::styled(format!(" {:>9}k", s.completion_tokens / 1000), row_style),
+            Span::styled(format!(" {:>9}k", s.total_tokens / 1000), row_style),
+            Span::styled(format!(" {:>6}", s.iterations), row_style),
+            Span::styled(format!(" {:>5.0}%", s.cache_hit_rate() * 100.0), row_style),
+            Span::styled(format!("  {}", short_time), row_style),
+        ]));
+    }
+
+    f.render_widget(Paragraph::new(table_lines), chunks[4]);
+}
+
+fn centered_rect(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
+    let popup_width = area.width * percent_x / 100;
+    let popup_height = area.height * percent_y / 100;
+    Rect {
+        x: area.x + (area.width.saturating_sub(popup_width)) / 2,
+        y: area.y + (area.height.saturating_sub(popup_height)) / 2,
+        width: popup_width,
+        height: popup_height,
+    }
 }

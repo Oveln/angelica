@@ -5,6 +5,7 @@ use ratatui::layout::Rect;
 use super::input::InputBuffer;
 use super::theme::Theme;
 use super::types::*;
+use crate::usage::UsageMetrics;
 
 // ── Sub-structs ──────────────────────────────────────
 
@@ -139,6 +140,9 @@ pub struct AppState {
     pub viewport: ViewportState,
     pub mouse: MouseState,
     pub fatigue: FatigueState,
+    pub usage: UsageMetrics,
+    pub usage_stats_path: std::path::PathBuf,
+    pub cached_usage_sessions: Option<Vec<crate::usage::SessionUsage>>,
 }
 
 impl Default for AppState {
@@ -178,6 +182,9 @@ impl Default for AppState {
                 mouse_down_on_toggle: None,
             },
             fatigue: FatigueState::default(),
+            usage: UsageMetrics::default(),
+            usage_stats_path: std::path::PathBuf::from("data/usage.jsonl"),
+            cached_usage_sessions: None,
         }
     }
 }
@@ -191,6 +198,10 @@ impl AppState {
     }
 
     pub fn with_conversation_path(mut self, path: String) -> Self {
+        self.usage_stats_path = std::path::PathBuf::from(&path)
+            .parent()
+            .map(|p| p.join("usage.jsonl"))
+            .unwrap_or_else(|| std::path::PathBuf::from("data/usage.jsonl"));
         self.conversation_path = path;
         self
     }
@@ -282,6 +293,26 @@ impl AppState {
             }
         }
         self.mode = crate::tui::mode::AppMode::Chat;
+        self.restore_current_usage();
+    }
+
+    /// Restore usage from the latest awake session in usage.jsonl.
+    /// This ensures the sidebar persists across restarts within the same awake.
+    fn restore_current_usage(&mut self) {
+        let sessions = crate::usage::load_session_summaries(&self.usage_stats_path);
+        // The last session is the current (incomplete) one
+        if let Some(last) = sessions.last()
+            && last.scope == crate::usage::UsageScope::Awake
+        {
+            self.usage = UsageMetrics {
+                prompt_tokens: last.prompt_tokens,
+                completion_tokens: last.completion_tokens,
+                total_tokens: last.total_tokens,
+                reasoning_tokens: last.reasoning_tokens,
+                cache_hit_tokens: last.cache_hit_tokens,
+                cache_miss_tokens: last.cache_miss_tokens,
+            };
+        }
     }
 
     pub fn theme(&self) -> &Theme {

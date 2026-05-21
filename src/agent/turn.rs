@@ -2,8 +2,10 @@ use tokio::sync::mpsc;
 
 use super::Agent;
 use super::events::AppEvent;
+use crate::agent::modes::SleepingMode;
 use crate::llm::types::ChatMessage;
 use crate::llm::{LlmResponse, LlmStreamEvent, RequestOptions};
+use crate::usage::{UsageRecord, UsageScope};
 
 impl Agent {
     pub(super) async fn next_llm_response(
@@ -42,6 +44,8 @@ impl Agent {
                     tool_calls = response.tool_calls.as_ref().map_or(0, Vec::len),
                     "received llm turn"
                 );
+                self.record_usage(event_tx, response.usage, messages.len())
+                    .await;
                 Some(response)
             }
             Ok(Err(e)) => {
@@ -71,6 +75,67 @@ impl Agent {
         }
         messages.extend(history.to_vec());
         messages
+    }
+
+    async fn record_usage(
+        &self,
+        event_tx: &mpsc::Sender<AppEvent>,
+        usage: Option<crate::usage::UsageMetrics>,
+        context_messages: usize,
+    ) {
+        let Some(metrics) = usage else {
+            return;
+        };
+
+        let scope = if self.run_state.as_any().is::<SleepingMode>() {
+            UsageScope::Sleep
+        } else {
+            UsageScope::Awake
+        };
+        let record = UsageRecord::new(scope, self.iteration, context_messages, metrics);
+        let config = self.config.clone();
+        let disk_record = record.clone();
+        tokio::task::spawn_blocking(move || {
+            append_usage_record(&config, &disk_record);
+        });
+        let _ = event_tx.send(AppEvent::UsageUpdate { record }).await;
+    }
+}
+
+fn append_usage_record(config: &crate::config::Config, record: &UsageRecord) {
+    let data_dir = std::path::PathBuf::from(&config.state.conversation_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("data"));
+    let path = data_dir.join("usage.jsonl");
+
+    if let Some(parent) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        tracing::warn!("Failed to create usage stats directory: {}", e);
+        return;
+    }
+
+    let json = match serde_json::to_string(record) {
+        Ok(json) => json,
+        Err(e) => {
+            tracing::warn!("Failed to serialize usage record: {}", e);
+            return;
+        }
+    };
+
+    use std::io::Write;
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            if let Err(e) = writeln!(file, "{}", json) {
+                tracing::warn!("Failed to write usage record: {}", e);
+            }
+        }
+        Err(e) => tracing::warn!("Failed to open usage stats file: {}", e),
     }
 }
 

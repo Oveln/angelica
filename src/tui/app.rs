@@ -176,6 +176,15 @@ async fn handle_key(
         return;
     }
 
+    if matches!(state.mode, AppMode::UsageStats) {
+        if key.code == crossterm::event::KeyCode::Esc
+            || key.code == crossterm::event::KeyCode::Char('q')
+        {
+            state.mode = AppMode::Chat;
+        }
+        return;
+    }
+
     match state.mode {
         AppMode::Approval(_) => {
             mode::approval::handle_key(state, key, tx).await;

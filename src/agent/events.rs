@@ -44,6 +44,9 @@ pub enum AppEvent {
         tool_calls: u32,
         desc: String,
     },
+    UsageUpdate {
+        record: crate::usage::UsageRecord,
+    },
 
     // Life state events
     FallingAsleep,

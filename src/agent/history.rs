@@ -325,4 +325,121 @@ mod tests {
         let loaded = History::load(path.clone()).unwrap();
         assert!(loaded.messages().is_empty());
     }
+
+    /// Simulates: tool call with invalid JSON → tool result with error recorded
+    #[test]
+    fn invalid_tool_call_records_error_result() {
+        let dir = TempDir::new().unwrap();
+        let mut history = History::new(dir.path().join("conversation.jsonl"));
+
+        // Simulate the agent recording an error for malformed JSON arguments
+        history.record_tool_result(
+            "call_bad_json".to_string(),
+            "Invalid JSON in tool call arguments: expected value at line 1 column 1".to_string(),
+        );
+
+        assert_eq!(history.messages().len(), 1);
+        let msg = &history.messages()[0];
+        assert_eq!(msg.role, "tool");
+        assert_eq!(msg.tool_call_id.as_deref(), Some("call_bad_json"));
+        assert!(msg.content.as_ref().unwrap().contains("Invalid JSON"));
+    }
+
+    /// Simulates: permission denied → tool result with denial message
+    #[test]
+    fn permission_denied_records_rejection_result() {
+        let dir = TempDir::new().unwrap();
+        let mut history = History::new(dir.path().join("conversation.jsonl"));
+
+        history.record_tool_result(
+            "call_denied".to_string(),
+            "Tool 'run_command' denied by permission policy.".to_string(),
+        );
+
+        assert_eq!(history.messages().len(), 1);
+        assert!(
+            history.messages()[0]
+                .content
+                .as_ref()
+                .unwrap()
+                .contains("denied")
+        );
+    }
+
+    /// Simulates: approval pending → approve → result updated
+    #[test]
+    fn approval_pending_then_approve_updates_result() {
+        let dir = TempDir::new().unwrap();
+        let mut history = History::new(dir.path().join("conversation.jsonl"));
+
+        // Pending approval
+        history.record_tool_result(
+            "call_approve".to_string(),
+            "Pending user approval...".to_string(),
+        );
+        assert_eq!(
+            history.messages()[0].content.as_deref(),
+            Some("Pending user approval...")
+        );
+
+        // Approved
+        history.update_tool_result("call_approve", "File written successfully.".to_string());
+        assert_eq!(
+            history.messages()[0].content.as_deref(),
+            Some("File written successfully.")
+        );
+    }
+
+    /// Simulates: approval pending → reject → result updated with feedback
+    #[test]
+    fn approval_pending_then_reject_updates_result() {
+        let dir = TempDir::new().unwrap();
+        let mut history = History::new(dir.path().join("conversation.jsonl"));
+
+        history.record_tool_result(
+            "call_reject".to_string(),
+            "Pending user approval...".to_string(),
+        );
+        history.update_tool_result(
+            "call_reject",
+            "User rejected this operation. Feedback: too risky".to_string(),
+        );
+        assert!(
+            history.messages()[0]
+                .content
+                .as_ref()
+                .unwrap()
+                .contains("rejected")
+        );
+        assert!(
+            history.messages()[0]
+                .content
+                .as_ref()
+                .unwrap()
+                .contains("too risky")
+        );
+    }
+
+    /// Simulates: batched edit → only one pending result per tc_id, all updated on approve
+    #[test]
+    fn batched_edit_single_approval_flow() {
+        let dir = TempDir::new().unwrap();
+        let mut history = History::new(dir.path().join("conversation.jsonl"));
+
+        // All edits in batch get pending status
+        for id in ["tc_1", "tc_2", "tc_3"] {
+            history.record_tool_result(id.to_string(), "Pending user approval...".to_string());
+        }
+
+        // On approve, all get updated to same result
+        let result = "3 edits applied to a.rs";
+        for id in ["tc_1", "tc_2", "tc_3"] {
+            history.update_tool_result(id, result.to_string());
+        }
+
+        // All should have the approved result
+        for msg in history.messages() {
+            assert_eq!(msg.content.as_deref(), Some(result));
+        }
+    }
 }

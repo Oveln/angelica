@@ -68,6 +68,11 @@ pub static BUILTIN_COMMANDS: &[SlashCommand] = &[
         aliases: &[],
         description: "Put angelica to sleep (dream & recharge)",
     },
+    SlashCommand {
+        name: "usage",
+        aliases: &["stats"],
+        description: "Show token usage statistics",
+    },
 ];
 
 #[derive(Debug, Clone)]

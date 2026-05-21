@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use crate::config::{LlmConfig, ProfileConfig};
 use crate::llm::types::*;
+use crate::usage::UsageMetrics;
 
 pub struct LlmClient {
     clients: HashMap<String, Arc<Client>>,
@@ -154,6 +155,7 @@ impl LlmClient {
             } else {
                 Some(tool_calls)
             },
+            usage: Some(convert_usage(response.usage)),
         })
     }
 
@@ -199,6 +201,7 @@ impl LlmClient {
             let mut thinking_buf = String::new();
             let mut content_buf = String::new();
             let mut tool_calls: Vec<GenaiToolCall> = Vec::new();
+            let mut usage: Option<UsageMetrics> = None;
 
             let mut stream = stream_response.stream;
 
@@ -221,6 +224,7 @@ impl LlmClient {
                         if let Some(reasoning) = end.captured_reasoning_content {
                             thinking_buf = reasoning;
                         }
+                        usage = end.captured_usage.map(convert_usage);
                         if let Some(mc) = end.captured_content {
                             tool_calls = mc.tool_calls().into_iter().cloned().collect();
                             if content_buf.is_empty() {
@@ -255,6 +259,7 @@ impl LlmClient {
                     Some(content_buf)
                 },
                 tool_calls: our_tool_calls,
+                usage,
             };
 
             let _ = tx.send(LlmStreamEvent::Done(response.clone())).await;
@@ -315,6 +320,7 @@ fn build_chat_options(
 
     let mut opts = ChatOptions::default()
         .with_max_tokens(max_tokens)
+        .with_capture_usage(true)
         .with_capture_content(true)
         .with_capture_reasoning_content(true)
         .with_capture_tool_calls(true);
@@ -333,6 +339,39 @@ fn build_chat_options(
     }
 
     opts
+}
+
+fn convert_usage(usage: genai::chat::Usage) -> UsageMetrics {
+    let prompt_tokens = usage.prompt_tokens.unwrap_or_default().max(0) as u64;
+    let completion_tokens = usage.completion_tokens.unwrap_or_default().max(0) as u64;
+    let total_tokens = usage
+        .total_tokens
+        .unwrap_or_else(|| {
+            usage.prompt_tokens.unwrap_or_default() + usage.completion_tokens.unwrap_or_default()
+        })
+        .max(0) as u64;
+    let reasoning_tokens = usage
+        .completion_tokens_details
+        .as_ref()
+        .and_then(|d| d.reasoning_tokens)
+        .unwrap_or_default()
+        .max(0) as u64;
+    let cache_hit_tokens = usage
+        .prompt_tokens_details
+        .as_ref()
+        .and_then(|d| d.cached_tokens)
+        .unwrap_or_default()
+        .max(0) as u64;
+    let cache_miss_tokens = prompt_tokens.saturating_sub(cache_hit_tokens);
+
+    UsageMetrics {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        reasoning_tokens,
+        cache_hit_tokens,
+        cache_miss_tokens,
+    }
 }
 
 fn convert_messages(messages: &[ChatMessage]) -> anyhow::Result<Vec<GenaiMessage>> {
@@ -425,6 +464,7 @@ pub struct LlmResponse {
     pub reasoning: Option<String>,
     pub content: Option<String>,
     pub tool_calls: Option<Vec<ToolCall>>,
+    pub usage: Option<UsageMetrics>,
 }
 
 pub struct RequestOptions {

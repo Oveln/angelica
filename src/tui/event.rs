@@ -122,6 +122,7 @@ impl AppState {
             AppEvent::FallingAsleep => {
                 self.is_streaming = false;
                 self.mode = AppMode::Chat;
+                self.usage = Default::default();
                 self.add_chat("system", "祈芷正在沉睡...", None);
             }
             AppEvent::Sleeping => {
@@ -130,6 +131,9 @@ impl AppState {
             }
             AppEvent::WakingUp { dream: _ } => {
                 self.add_chat("system", "祈芷醒来了，梦的余韵还留在心头。", None);
+            }
+            AppEvent::UsageUpdate { record } => {
+                self.usage.accumulate(&record.metrics);
             }
         }
     }

@@ -77,6 +77,7 @@ pub enum AppMode {
     Streaming,
     SlashMenu(SlashMenuState),
     Approval(ApprovalState),
+    UsageStats,
 }
 
 pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::Sender<UserAction>) {
@@ -155,6 +156,11 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
             "sleep" => {
                 state.add_chat("system", "Falling asleep...", None);
                 let _ = tx.send(UserAction::ForceSleep).await;
+            }
+            "usage" | "stats" => {
+                let sessions = crate::usage::load_session_summaries(&state.usage_stats_path);
+                state.cached_usage_sessions = Some(sessions);
+                state.mode = AppMode::UsageStats;
             }
             _ => {
                 state.add_chat("system", &format!("Unknown command: /{}", cmd_name), None);

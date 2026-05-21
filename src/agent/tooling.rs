@@ -67,8 +67,7 @@ impl Agent {
                 .await;
         }
         if self.run_state.accumulate_history() {
-            self.history
-                .record_tool_result(call_id, result);
+            self.history.record_tool_result(call_id, result);
         }
     }
 
@@ -172,12 +171,11 @@ impl Agent {
                     self.history
                         .record_tool_result(tc.id.clone(), "Pending user approval...".to_string());
                 }
-                self.pending_approval = Some(PendingApproval {
+                self.pending_approval = Some(PendingApproval::Single {
                     tc_ids: vec![tc.id],
                     tool_name: name,
                     args,
                     display_args: tc.function.arguments.clone(),
-                    batched_edits: None,
                     preview: diff_preview,
                 });
 
@@ -201,7 +199,8 @@ impl Agent {
             "processing batched tool calls"
         );
 
-        let action = self.evaluate_permission("edit_file", Some(&path), Some("edit_file (batched)"));
+        let action =
+            self.evaluate_permission("edit_file", Some(&path), Some("edit_file (batched)"));
 
         match action {
             PermissionAction::Allow => {
@@ -299,12 +298,11 @@ impl Agent {
                     }
                 }
 
-                self.pending_approval = Some(PendingApproval {
+                self.pending_approval = Some(PendingApproval::BatchedEdit {
                     tc_ids: batched.iter().map(|b| b.tc_id.clone()).collect(),
-                    tool_name: "edit_file".to_string(),
-                    args: serde_json::json!({"path": path}),
+                    path: path.clone(),
+                    edits: batched,
                     display_args,
-                    batched_edits: Some(batched),
                     preview: extract_diff_preview(&preview),
                 });
 
@@ -324,7 +322,12 @@ impl Agent {
         }
     }
 
-    fn evaluate_permission(&self, name: &str, target: Option<&str>, label: Option<&str>) -> PermissionAction {
+    fn evaluate_permission(
+        &self,
+        name: &str,
+        target: Option<&str>,
+        label: Option<&str>,
+    ) -> PermissionAction {
         if self.run_state.skip_permissions() {
             return PermissionAction::Allow;
         }
@@ -376,34 +379,40 @@ impl Agent {
         };
 
         let stream_to_tui = self.run_state.stream_to_tui();
+        let tc_ids = pending.tc_ids().to_vec();
+        let tool_name = pending.tool_name().to_string();
+        let display_args = pending.display_args().to_string();
+        let preview = pending.preview().map(String::from);
 
         if stream_to_tui {
-            for tc_id in &pending.tc_ids {
+            for tc_id in &tc_ids {
                 let _ = event_tx
                     .send(AppEvent::ToolCalling {
                         call_id: tc_id.clone(),
-                        name: pending.tool_name.clone(),
-                        arguments: pending.display_args.clone(),
+                        name: tool_name.clone(),
+                        arguments: display_args.clone(),
                     })
                     .await;
             }
         }
 
-        let result = if let Some(ref batched) = pending.batched_edits {
-            let edits: Vec<(String, String)> = batched
-                .iter()
-                .map(|e| (e.search.clone(), e.replace.clone()))
-                .collect();
-            let path = pending.args["path"].as_str().unwrap_or("?");
-            match crate::tools::edit_file::execute_batched(path, &edits) {
-                Ok(summary) => summary,
-                Err(e) => format!("Error: {}", e),
+        let result = match &pending {
+            PendingApproval::BatchedEdit { edits, path, .. } => {
+                let edits: Vec<(String, String)> = edits
+                    .iter()
+                    .map(|e| (e.search.clone(), e.replace.clone()))
+                    .collect();
+                match crate::tools::edit_file::execute_batched(path, &edits) {
+                    Ok(summary) => summary,
+                    Err(e) => format!("Error: {}", e),
+                }
             }
-        } else {
-            self.execute_tool(&pending.tool_name, pending.args).await
+            PendingApproval::Single { args, .. } => {
+                self.execute_tool(&tool_name, args.clone()).await
+            }
         };
 
-        for tc_id in &pending.tc_ids {
+        for tc_id in &tc_ids {
             if self.run_state.accumulate_history() {
                 self.history.update_tool_result(tc_id, result.clone());
             }
@@ -411,9 +420,9 @@ impl Agent {
                 let _ = event_tx
                     .send(AppEvent::ToolResult {
                         call_id: tc_id.clone(),
-                        name: pending.tool_name.clone(),
+                        name: tool_name.clone(),
                         result: result.clone(),
-                        diff_preview: pending.preview.clone(),
+                        diff_preview: preview.clone(),
                     })
                     .await;
             }
@@ -436,7 +445,8 @@ impl Agent {
             format!("User rejected this operation. Feedback: {}", feedback)
         };
         let stream_to_tui = self.run_state.stream_to_tui();
-        for tc_id in &pending.tc_ids {
+        let tc_ids = pending.tc_ids().to_vec();
+        for tc_id in &tc_ids {
             if self.run_state.accumulate_history() {
                 self.history.update_tool_result(tc_id, msg.clone());
             }
@@ -493,4 +503,39 @@ fn extract_diff_preview(preview: &str) -> Option<String> {
         .map(|(i, _)| i)
         .unwrap_or(0);
     Some(all[..=diff_end].join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_diff_preview_from_unified_diff() {
+        let diff = "--- a/foo.rs\n+++ b/foo.rs\n@@ -1,3 +1,3 @@\n-old\n+new\n context\n";
+        let result = extract_diff_preview(diff);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("+new"));
+    }
+
+    #[test]
+    fn extract_diff_preview_rejects_non_diff() {
+        assert!(extract_diff_preview("just some text").is_none());
+        assert!(extract_diff_preview("$ ls").is_none());
+    }
+
+    #[test]
+    fn extract_diff_preview_from_diff_command() {
+        let diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n";
+        let result = extract_diff_preview(diff);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn extract_diff_preview_trims_trailing_non_diff_lines() {
+        let input =
+            "--- a.rs\n+++ a.rs\n@@ -1 +1 @@\n-old\n+new\nsome trailing noise\nmore noise\n";
+        let result = extract_diff_preview(input).unwrap();
+        // Should end at the last diff line
+        assert!(result.ends_with("+new"));
+    }
 }

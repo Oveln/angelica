@@ -12,3 +12,4 @@ pub mod sleep;
 pub mod state;
 pub mod tools;
 pub mod tui;
+pub mod usage;

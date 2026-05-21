@@ -44,6 +44,7 @@ impl Agent {
                 reasoning,
                 content,
                 tool_calls,
+                usage: _,
             } = llm_result;
 
             if self.run_state.accumulate_history() {
