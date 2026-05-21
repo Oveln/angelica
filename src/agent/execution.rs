@@ -394,10 +394,18 @@ impl Agent {
                 return false;
             }
 
-            let system_msg = self.build_system_message();
-            let mut all_messages = vec![system_msg];
+            let mut all_messages = Vec::new();
             if self.run_state.include_history() {
-                all_messages.extend(self.history.messages().to_vec());
+                let history = self.history.messages();
+                let has_system = history.iter().any(|m| m.role == "system" && m.name.is_none());
+                if has_system {
+                    all_messages.extend(history.to_vec());
+                } else {
+                    all_messages.push(self.build_system_message());
+                    all_messages.extend(history.to_vec());
+                }
+            } else {
+                all_messages.push(self.build_system_message());
             }
 
             let specs = self.all_tool_specs();
@@ -473,11 +481,15 @@ impl Agent {
                     let full_text = content.unwrap_or_default();
                     let _ = event_tx.send(AppEvent::TextDone { full_text }).await;
                     let _ = event_tx.send(AppEvent::TurnComplete).await;
+                    self.send_fatigue_update(event_tx);
                 }
                 return false;
             };
 
             self.run_state.on_tool_calls(tcs.len());
+            if stream_to_tui {
+                self.send_fatigue_update(event_tx);
+            }
             self.tool_queue = group_tool_calls(tcs).into();
         }
     }

@@ -187,7 +187,24 @@ async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent
         tracing::error!("Failed to cleanup old snapshots: {}", e);
     }
 
-    // Phase 7: build new awake agent with dream afterglow
+    // Phase 7: reset state — clear fatigue and conversation after sleep completes
+    {
+        let state_path = std::path::PathBuf::from(&config.state.path);
+        if state_path.exists() {
+            if let Err(e) = std::fs::remove_file(&state_path) {
+                tracing::error!("Failed to remove state file: {}", e);
+            }
+        }
+
+        let conversation_path = std::path::PathBuf::from(&config.state.conversation_path);
+        if conversation_path.exists() {
+            if let Err(e) = std::fs::remove_file(&conversation_path) {
+                tracing::error!("Failed to remove conversation history: {}", e);
+            }
+        }
+    }
+
+    // Phase 8: build new awake agent with dream afterglow
     let mut new_agent = Agent::awake(config);
 
     {
@@ -197,6 +214,7 @@ async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent
         }
         new_awake.set_last_snapshot(snapshot_ts);
     }
+    new_agent.save_state();
 
     if let Err(e) = new_agent.initialize().await {
         tracing::error!("Failed to initialize agent after sleep: {}", e);
@@ -205,6 +223,7 @@ async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent
     if let Some(dream) = dream {
         let _ = event_tx.send(AppEvent::WakingUp { dream }).await;
     }
+    new_agent.send_fatigue_update(event_tx);
 
     new_agent
 }

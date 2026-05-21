@@ -108,6 +108,17 @@ impl AppState {
             AppEvent::Error { message } => {
                 self.add_chat("system", &format!("Error: {}", message), None);
             }
+            AppEvent::FatigueUpdate {
+                fatigue,
+                turns,
+                tool_calls,
+                desc,
+            } => {
+                self.fatigue.fatigue = *fatigue;
+                self.fatigue.turns = *turns;
+                self.fatigue.tool_calls = *tool_calls;
+                self.fatigue.desc = desc.clone();
+            }
             AppEvent::FallingAsleep => {
                 self.is_streaming = false;
                 self.mode = AppMode::Chat;

@@ -1,10 +1,54 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::memory::MemoryManager;
 use crate::tools::Tool;
+
+/// A dreaming tool that captures the agent's dream during sleep.
+/// The dream content is stored in a shared Arc<Mutex<Option<String>>>.
+pub struct DreamTool {
+    dream: Arc<Mutex<Option<String>>>,
+}
+
+impl DreamTool {
+    pub fn new(dream: Arc<Mutex<Option<String>>>) -> Self {
+        Self { dream }
+    }
+}
+
+#[async_trait]
+impl Tool for DreamTool {
+    fn name(&self) -> &str {
+        "dreaming"
+    }
+
+    fn description(&self) -> &str {
+        "记录你的梦境。当你整理完思绪，想随口说点什么的时候，调用这个工具。这会是你在睡眠中留下的痕迹，醒来后会残留淡淡的余韵。"
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "dream": {
+                    "type": "string",
+                    "description": "你的梦——可以是任何东西，不必和今天的事有关。一段感受、一个画面、一句自言自语……"
+                }
+            },
+            "required": ["dream"]
+        })
+    }
+
+    async fn execute(&self, args: Value) -> anyhow::Result<String> {
+        let dream = args["dream"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("missing 'dream'"))?;
+        *self.dream.lock().expect("dream lock poisoned") = Some(dream.to_string());
+        Ok("梦已记录。晚安。".to_string())
+    }
+}
 
 macro_rules! define_edit_tool {
     ($name:ident, $tool_name:expr, $desc:expr, $read_fn:ident, $write_fn:ident) => {

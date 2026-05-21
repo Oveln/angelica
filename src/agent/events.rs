@@ -38,6 +38,13 @@ pub enum AppEvent {
         message: String,
     },
 
+    FatigueUpdate {
+        fatigue: f64,
+        turns: u32,
+        tool_calls: u32,
+        desc: String,
+    },
+
     // Life state events
     FallingAsleep,
     Sleeping,

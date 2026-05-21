@@ -77,7 +77,7 @@ impl PromptBuilder for AwakePromptBuilder {
     fn build_context_message(&self, fatigue_desc: &str, wake_dream: Option<&str>) -> ChatMessage {
         let now = chrono::Local::now();
         let mut content = format!(
-            "{}\n当前时间：{}",
+            "你的状态：{}\n当前时间：{}",
             fatigue_desc,
             now.format("%Y-%m-%d %H:%M")
         );
@@ -87,7 +87,7 @@ impl PromptBuilder for AwakePromptBuilder {
         }
 
         ChatMessage {
-            role: "user".to_string(),
+            role: "system".to_string(),
             content: Some(content),
             reasoning_content: None,
             tool_calls: None,
@@ -133,6 +133,7 @@ impl PromptBuilder for SleepingPromptBuilder {
 - edit_soul：审视你的性格、行为方式、处世态度、世界观
 - edit_memory：整理你的记忆
 - edit_profile：更新你对用户的认知
+- dreaming：记录你的梦境（整理完后必须调用此工具来结束睡眠）
 
 SOUL.md 是你的性格、行为方式、处世态度、世界观。
 MEMORY.md 是你经历的事情。
@@ -155,8 +156,8 @@ profile.md 是关于用户的认知。
 ## 你现在的 profile.md
 {}
 
-按你觉得合适的方式整理。整理完后，随口说点什么——这就是你的梦。
-可以是任何东西，不必和今天的事有关。",
+按你觉得合适的方式整理。整理完后，调用 dreaming 工具记录你的梦。
+可以是任何东西，不必和今天的事有关。一段感受、一个画面、一句自言自语……",
             self.turns,
             self.tool_calls,
             self.fatigue_desc,
@@ -178,7 +179,7 @@ profile.md 是关于用户的认知。
 
     fn build_context_message(&self, _fatigue_desc: &str, _wake_dream: Option<&str>) -> ChatMessage {
         ChatMessage {
-            role: "user".to_string(),
+            role: "system".to_string(),
             content: Some("你正在沉睡中，反思过去。".to_string()),
             reasoning_content: None,
             tool_calls: None,

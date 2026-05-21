@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::agent::modes::RunMode;
 use crate::llm::types::{ChatMessage, ToolSpec};
@@ -15,7 +15,7 @@ const SLEEP_MAX_ITERATIONS: usize = 10;
 pub struct SleepingMode {
     tools: ToolRegistry,
     prompt_builder: SleepingPromptBuilder,
-    dream: Option<String>,
+    dream: Arc<Mutex<Option<String>>>,
 }
 
 impl SleepingMode {
@@ -29,20 +29,23 @@ impl SleepingMode {
         let prompt_builder =
             SleepingPromptBuilder::new(conversation_summary, turns, tool_calls, fatigue_desc);
 
+        let dream: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
         let mut reg = ToolRegistry::new();
         reg.register(Box::new(tools::EditSoulTool::new(memory.clone())));
         reg.register(Box::new(tools::EditMemoryTool::new(memory.clone())));
         reg.register(Box::new(tools::EditProfileTool::new(memory)));
+        reg.register(Box::new(tools::DreamTool::new(dream.clone())));
 
         Self {
             tools: reg,
             prompt_builder,
-            dream: None,
+            dream,
         }
     }
 
     pub fn take_dream(&mut self) -> Option<String> {
-        self.dream.take()
+        self.dream.lock().expect("dream lock poisoned").take()
     }
 }
 
@@ -75,10 +78,8 @@ impl RunMode for SleepingMode {
         Vec::new()
     }
 
-    fn on_turn_complete(&mut self, content: Option<&str>) {
-        if let Some(c) = content {
-            self.dream = Some(c.to_string());
-        }
+    fn on_turn_complete(&mut self, _content: Option<&str>) {
+        // Dream is now captured via the dreaming tool
     }
 
     fn skip_permissions(&self) -> bool {
@@ -90,7 +91,7 @@ impl RunMode for SleepingMode {
     }
 
     fn is_finished(&self) -> bool {
-        self.dream.is_some()
+        self.dream.lock().expect("dream lock poisoned").is_some()
     }
 
     fn max_iterations(&self) -> Option<usize> {

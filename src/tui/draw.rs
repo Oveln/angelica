@@ -15,6 +15,8 @@ use super::render::build_all_lines;
 use super::state::AppState;
 use super::theme::{APP_NAME, APP_TAGLINE, PROMPT, Theme, logo_lines};
 
+const STATUS_PANEL_WIDTH: u16 = 22;
+
 pub fn draw(f: &mut Frame, state: &mut AppState) {
     let theme = *state.theme();
     let status_height: u16 = 1;
@@ -32,7 +34,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         _ => 3,
     };
 
-    let chunks = Layout::default()
+    let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(3),
@@ -41,20 +43,36 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         ])
         .split(f.area());
 
+    let show_panel = !matches!(state.mode, AppMode::Welcome) && f.area().width > 60;
+
+    let msgs_area = if show_panel {
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(20),
+                Constraint::Length(STATUS_PANEL_WIDTH),
+            ])
+            .split(outer[0]);
+        draw_status_panel(f, &theme, cols[1], state);
+        cols[0]
+    } else {
+        outer[0]
+    };
+
     if matches!(state.mode, AppMode::Welcome) {
-        draw_welcome(f, &theme, chunks[0]);
+        draw_welcome(f, &theme, outer[0]);
     } else {
         draw_messages(
             f,
             state,
-            chunks[0],
-            chunks[0].width.saturating_sub(1) as usize,
+            msgs_area,
+            msgs_area.width.saturating_sub(1) as usize,
         );
     }
 
     match &state.mode {
         AppMode::Welcome => {
-            draw_input(f, state, chunks[1], &theme);
+            draw_input(f, state, outer[1], &theme);
         }
         AppMode::Approval(a) => {
             let has_feedback = a.selected == ApprovalChoice::EditFeedback;
@@ -67,7 +85,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
             let approval_chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints(constraints)
-                .split(chunks[1]);
+                .split(outer[1]);
 
             mode::approval::draw_header(f, approval_chunks[0], &a.tool_label, &theme);
             let input_idx = if has_feedback {
@@ -79,11 +97,11 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
             mode::approval::draw_choices(f, state, approval_chunks[input_idx], &theme);
         }
         _ => {
-            draw_input(f, state, chunks[1], &theme);
+            draw_input(f, state, outer[1], &theme);
         }
     }
 
-    draw_status_bar(f, state, chunks[2], &theme);
+    draw_status_bar(f, state, outer[2], &theme);
 
     if matches!(state.mode, AppMode::SlashMenu(_)) {
         mode::slash::draw(f, state, f.area(), &theme);
@@ -170,6 +188,58 @@ fn draw_welcome(f: &mut Frame, theme: &Theme, area: Rect) {
     }
 
     f.render_widget(Paragraph::new(lines), area);
+}
+
+fn draw_status_panel(f: &mut Frame, theme: &Theme, area: Rect, state: &AppState) {
+    let fatigue_bar_width = (area.width as usize).saturating_sub(4);
+    let filled = (state.fatigue.fatigue * fatigue_bar_width as f64).round() as usize;
+    let empty = fatigue_bar_width.saturating_sub(filled);
+    let bar = format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty));
+
+    let fatigue_pct = format!("{:.0}%", state.fatigue.fatigue * 100.0);
+
+    let lines = vec![
+        Line::from(Span::styled(
+            " \u{25CF} \u{72B6}\u{6001}",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!(" {}", state.fatigue.desc),
+            Style::default().fg(theme.status_fg),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!(" {}", bar),
+            Style::default().fg(theme.muted),
+        )),
+        Line::from(Span::styled(
+            format!(
+                " {}\u{258E}{}",
+                " ".repeat(fatigue_bar_width.saturating_sub(fatigue_pct.len()) / 2),
+                fatigue_pct
+            ),
+            Style::default().fg(theme.status_muted),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!(" \u{21BB} {} turns", state.fatigue.turns),
+            Style::default().fg(theme.status_muted),
+        )),
+        Line::from(Span::styled(
+            format!(" \u{2699} {} calls", state.fatigue.tool_calls),
+            Style::default().fg(theme.status_muted),
+        )),
+    ];
+
+    let panel = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::LEFT)
+            .border_style(Style::default().fg(theme.border)),
+    );
+    f.render_widget(panel, area);
 }
 
 fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {

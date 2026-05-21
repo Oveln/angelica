@@ -8,6 +8,24 @@ use super::types::*;
 
 // ── Sub-structs ──────────────────────────────────────
 
+pub struct FatigueState {
+    pub fatigue: f64,
+    pub turns: u32,
+    pub tool_calls: u32,
+    pub desc: String,
+}
+
+impl Default for FatigueState {
+    fn default() -> Self {
+        Self {
+            fatigue: 0.0,
+            turns: 0,
+            tool_calls: 0,
+            desc: "精神饱满。".to_string(),
+        }
+    }
+}
+
 pub struct DisplayConfig {
     pub thinking_visible: bool,
     pub verbosity: Verbosity,
@@ -120,6 +138,7 @@ pub struct AppState {
     pub scroll: ScrollState,
     pub viewport: ViewportState,
     pub mouse: MouseState,
+    pub fatigue: FatigueState,
 }
 
 impl Default for AppState {
@@ -158,6 +177,7 @@ impl Default for AppState {
                 mouse_down_pos: None,
                 mouse_down_on_toggle: None,
             },
+            fatigue: FatigueState::default(),
         }
     }
 }

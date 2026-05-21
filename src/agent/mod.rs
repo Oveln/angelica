@@ -51,6 +51,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::agent::events::AppEvent;
 use crate::agent::group::PendingApproval;
 use crate::agent::group::ToolCallGroup;
 use crate::agent::history::History;
@@ -183,6 +184,12 @@ impl Agent {
     }
 
     pub fn push_user_message(&mut self, content: &str) {
+        // Ensure system prompt is the first message in history
+        if !self.history.messages().iter().any(|m| m.role == "system" && m.name.is_none()) {
+            let system_msg = self.build_system_message();
+            self.history.push(system_msg);
+        }
+
         let context_msg = self.build_context_message(None);
         self.history.push(context_msg);
 
@@ -236,6 +243,19 @@ impl Agent {
             .downcast_ref::<AwakeMode>()
             .map(|a| a.fatigue_desc().to_string())
             .unwrap_or_default()
+    }
+
+    fn send_fatigue_update(&self, event_tx: &tokio::sync::mpsc::Sender<AppEvent>) {
+        if let Some(awake) = self.run_state.as_any().downcast_ref::<AwakeMode>() {
+            let (turns, tool_calls, fatigue) = awake.fatigue_info();
+            let desc = awake.fatigue_desc().to_string();
+            let _ = event_tx.try_send(AppEvent::FatigueUpdate {
+                fatigue,
+                turns,
+                tool_calls,
+                desc,
+            });
+        }
     }
 
     fn max_iterations(&self) -> usize {
