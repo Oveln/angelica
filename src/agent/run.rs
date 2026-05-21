@@ -102,19 +102,16 @@ async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent
 
     let _ = event_tx.send(AppEvent::Sleeping).await;
 
-    // Phase 1: snapshot
+    // Phase 1: create per-sleep folder and backup memory files
     let snapshot_ts = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
-    let snapshot_dir = std::path::Path::new(&config.state.snapshots_dir).join(&snapshot_ts);
-    if let Err(e) = memory.create_snapshot(&snapshot_dir) {
-        tracing::error!("Failed to create snapshot: {}", e);
+    let archive_dir = std::path::Path::new(&config.state.archive_dir);
+    let sleep_folder = archive_dir.join(&snapshot_ts);
+    if let Err(e) = memory.create_snapshot(&sleep_folder) {
+        tracing::error!("Failed to backup memory files: {}", e);
     }
 
     // Phase 2: archive conversation
-    let archive_dir = std::path::Path::new(&config.state.archive_dir);
-    if let Err(e) = std::fs::create_dir_all(archive_dir) {
-        tracing::error!("Failed to create archive dir: {}", e);
-    }
-    let archive_path = archive_dir.join(format!("{}.jsonl", snapshot_ts));
+    let archive_path = sleep_folder.join("conversation.jsonl");
     if !conversation_messages.is_empty() {
         let now_ts = chrono::Local::now().to_rfc3339();
         if let Ok(mut file) = std::fs::File::create(&archive_path) {
@@ -138,8 +135,7 @@ async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent
         fatigue_desc,
     );
 
-    let sleep_history_path = std::path::PathBuf::from(&config.state.archive_dir)
-        .join(format!("{}.sleep.jsonl", snapshot_ts));
+    let sleep_history_path = sleep_folder.join("sleep.jsonl");
     let mut sleep_agent = Agent::new(
         config.clone(),
         Box::new(sleeping),
@@ -171,7 +167,7 @@ async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent
         "fatigue": fatigue_val,
         "dream": dream,
     });
-    let sleep_path = archive_dir.join(format!("{}.sleep.json", snapshot_ts));
+    let sleep_path = sleep_folder.join("sleep.json");
     if let Err(e) = std::fs::write(
         &sleep_path,
         serde_json::to_string_pretty(&sleep_record).unwrap_or_default(),
@@ -179,12 +175,12 @@ async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent
         tracing::error!("Failed to write sleep record: {}", e);
     }
 
-    // Phase 6: cleanup old snapshots
+    // Phase 6: cleanup old sleep folders
     if let Err(e) = crate::sleep::cleanup_old_snapshots(
-        std::path::Path::new(&config.state.snapshots_dir),
+        archive_dir,
         config.state.max_snapshots,
     ) {
-        tracing::error!("Failed to cleanup old snapshots: {}", e);
+        tracing::error!("Failed to cleanup old sleep folders: {}", e);
     }
 
     // Phase 7: reset state — clear fatigue and conversation after sleep completes

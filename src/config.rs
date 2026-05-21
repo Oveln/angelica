@@ -43,7 +43,6 @@ impl Config {
         self.state.path = Self::absolute_or(base, &self.state.path);
         self.state.conversation_path = Self::absolute_or(base, &self.state.conversation_path);
         self.state.archive_dir = Self::absolute_or(base, &self.state.archive_dir);
-        self.state.snapshots_dir = Self::absolute_or(base, &self.state.snapshots_dir);
     }
 
     fn absolute_or(base: &Path, path: &str) -> String {
@@ -256,8 +255,6 @@ pub struct StateConfig {
     pub conversation_path: String,
     #[serde(default = "default_archive_dir")]
     pub archive_dir: String,
-    #[serde(default = "default_snapshots_dir")]
-    pub snapshots_dir: String,
     #[serde(default = "default_max_snapshots")]
     pub max_snapshots: usize,
 }
@@ -268,7 +265,6 @@ impl Default for StateConfig {
             path: default_state_path(),
             conversation_path: default_conversation_path(),
             archive_dir: default_archive_dir(),
-            snapshots_dir: default_snapshots_dir(),
             max_snapshots: default_max_snapshots(),
         }
     }
@@ -282,9 +278,6 @@ fn default_conversation_path() -> String {
 }
 fn default_archive_dir() -> String {
     "data/archive".to_string()
-}
-fn default_snapshots_dir() -> String {
-    "data/snapshots".to_string()
 }
 fn default_max_snapshots() -> usize {
     20

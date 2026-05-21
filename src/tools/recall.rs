@@ -73,11 +73,11 @@ impl Tool for RecallTool {
             }
         }
 
-        // Search archive files
+        // Search archive folders
         if self.archive_dir.exists() {
             let mut entries: Vec<_> = std::fs::read_dir(&self.archive_dir)?
                 .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().is_some_and(|ext| ext == "jsonl"))
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
                 .collect();
             entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
 
@@ -85,10 +85,13 @@ impl Tool for RecallTool {
                 if results.len() >= limit {
                     break;
                 }
-                if let Ok(matches) =
-                    self.search_jsonl(&entry.path(), &keyword_lower, limit - results.len())
-                {
-                    results.extend(matches);
+                let conv_path = entry.path().join("conversation.jsonl");
+                if conv_path.exists() {
+                    if let Ok(matches) =
+                        self.search_jsonl(&conv_path, &keyword_lower, limit - results.len())
+                    {
+                        results.extend(matches);
+                    }
                 }
             }
         }
