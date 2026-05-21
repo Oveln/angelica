@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod config;
+pub mod data_git;
 pub mod fatigue;
 pub mod llm;
 pub mod mcp;

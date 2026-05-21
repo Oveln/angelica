@@ -190,22 +190,6 @@ impl MemoryManager {
         }
     }
 
-    // ── Snapshots ──
-
-    pub fn create_snapshot(&self, snapshot_dir: &std::path::Path) -> anyhow::Result<()> {
-        std::fs::create_dir_all(snapshot_dir)?;
-        for (src, name) in [
-            (&self.soul_path, "SOUL.md"),
-            (&self.memory_path, "MEMORY.md"),
-            (&self.profile_path, "profile.md"),
-        ] {
-            if src.exists() {
-                std::fs::copy(src, snapshot_dir.join(name))?;
-            }
-        }
-        Ok(())
-    }
-
     // ── Truncation ──
 
     fn truncate(&self, content: &str) -> String {
@@ -331,25 +315,5 @@ mod tests {
         let result = mgr.search_notebook("foo");
         assert!(result.contains("foo bar"));
         assert!(result.contains("1 行匹配"));
-    }
-
-    #[test]
-    fn create_snapshot() {
-        let dir = TempDir::new().unwrap();
-        let mgr = make_manager(&dir);
-        mgr.write_soul("my soul");
-        mgr.write_memory("my memory");
-        mgr.write_user_profile("my profile");
-
-        let snap_dir = dir.path().join("snapshots/test");
-        mgr.create_snapshot(&snap_dir).unwrap();
-
-        assert!(snap_dir.join("SOUL.md").exists());
-        assert!(snap_dir.join("MEMORY.md").exists());
-        assert!(snap_dir.join("profile.md").exists());
-        assert_eq!(
-            std::fs::read_to_string(snap_dir.join("SOUL.md")).unwrap(),
-            "my soul"
-        );
     }
 }

@@ -57,7 +57,7 @@ impl ToolRegistry {
     pub fn with_awake_defaults(
         memory: Arc<MemoryManager>,
         skills: Arc<SkillRegistry>,
-        archive_dir: &str,
+        history_dir: &str,
         conversation_path: &str,
     ) -> Self {
         let mut reg = Self::new();
@@ -69,7 +69,7 @@ impl ToolRegistry {
         reg.register(Box::new(skill::SkillTool::new(skills)));
         reg.register(Box::new(notebook::NotebookTool::new(memory)));
         reg.register(Box::new(recall::RecallTool::new(
-            std::path::PathBuf::from(archive_dir),
+            std::path::PathBuf::from(history_dir),
             std::path::PathBuf::from(conversation_path),
         )));
         reg

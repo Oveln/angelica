@@ -23,10 +23,15 @@ impl AwakeMode {
             crate::llm::patch::ModelPatch::new(&config.llm.model, config.llm.role_immersion);
         let prompt_builder = AwakePromptBuilder::new(model_patch);
 
+        let history_dir = std::path::PathBuf::from(&config.state.conversation_path)
+            .parent()
+            .map(|p| p.join("history").to_string_lossy().to_string())
+            .unwrap_or_else(|| "data/history".to_string());
+
         let tools = ToolRegistry::with_awake_defaults(
             memory,
             skills,
-            &config.state.archive_dir,
+            &history_dir,
             &config.state.conversation_path,
         );
 

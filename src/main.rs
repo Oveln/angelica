@@ -46,6 +46,17 @@ async fn main() -> anyhow::Result<()> {
     let (user_action_tx, user_action_rx) =
         mpsc::channel::<angelica::agent::events::UserAction>(256);
 
+    // Ensure data directory is a git repo for history tracking
+    {
+        let data_dir = std::path::PathBuf::from(&config.state.conversation_path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("data"));
+        if let Err(e) = angelica::data_git::ensure_repo(&data_dir) {
+            tracing::warn!("Failed to initialize data git repo: {}", e);
+        }
+    }
+
     let model_name = config.llm.model.clone();
     let conversation_path = config.state.conversation_path.clone();
     let config_clone = config;

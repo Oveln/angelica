@@ -8,14 +8,14 @@ use crate::agent::history::TimedMessage;
 use crate::tools::Tool;
 
 pub struct RecallTool {
-    archive_dir: PathBuf,
+    history_dir: PathBuf,
     conversation_path: PathBuf,
 }
 
 impl RecallTool {
-    pub fn new(archive_dir: PathBuf, conversation_path: PathBuf) -> Self {
+    pub fn new(history_dir: PathBuf, conversation_path: PathBuf) -> Self {
         Self {
-            archive_dir,
+            history_dir,
             conversation_path,
         }
     }
@@ -73,9 +73,9 @@ impl Tool for RecallTool {
             }
         }
 
-        // Search archive folders
-        if self.archive_dir.exists() {
-            let mut entries: Vec<_> = std::fs::read_dir(&self.archive_dir)?
+        // Search history folders
+        if self.history_dir.exists() {
+            let mut entries: Vec<_> = std::fs::read_dir(&self.history_dir)?
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
                 .collect();

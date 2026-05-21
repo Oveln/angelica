@@ -1,7 +1,5 @@
 pub mod tools;
 
-use std::path::Path;
-
 use crate::llm::types::ChatMessage;
 
 pub fn build_conversation_text(messages: &[ChatMessage]) -> String {
@@ -48,28 +46,4 @@ pub fn build_conversation_text(messages: &[ChatMessage]) -> String {
         }
     }
     text
-}
-
-pub fn cleanup_old_snapshots(snapshots_dir: &Path, max_snapshots: usize) -> anyhow::Result<()> {
-    if !snapshots_dir.exists() {
-        return Ok(());
-    }
-
-    let mut entries: Vec<_> = std::fs::read_dir(snapshots_dir)?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .collect();
-
-    if entries.len() <= max_snapshots {
-        return Ok(());
-    }
-
-    entries.sort_by_key(|e| e.file_name());
-    let to_remove = entries.len() - max_snapshots;
-    for entry in entries.iter().take(to_remove) {
-        if let Err(e) = std::fs::remove_dir_all(entry.path()) {
-            tracing::warn!("Failed to remove old snapshot {:?}: {}", entry.path(), e);
-        }
-    }
-    Ok(())
 }
