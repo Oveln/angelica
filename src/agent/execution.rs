@@ -366,7 +366,7 @@ impl Agent {
 
 impl Agent {
     pub async fn step(&mut self, event_tx: &mpsc::Sender<AppEvent>) -> bool {
-        use crate::llm::{AppStreamEvent, StreamFinal};
+        use crate::llm::{LlmResponse, LlmStreamEvent, RequestOptions};
 
         let max_iterations = self.max_iterations();
         let stream_to_tui = self.run_state.stream_to_tui();
@@ -410,41 +410,16 @@ impl Agent {
 
             let specs = self.all_tool_specs();
 
-            let (stream_tx, mut stream_rx) = mpsc::channel::<AppStreamEvent>(512);
-
-            let fwd_tx = if stream_to_tui {
-                Some(event_tx.clone())
-            } else {
-                None
-            };
-            let drain_handle = tokio::spawn(async move {
-                while let Some(evt) = stream_rx.recv().await {
-                    if let Some(ref tx) = fwd_tx {
-                        match evt {
-                            AppStreamEvent::ThinkingDelta { delta } => {
-                                let _ = tx.send(AppEvent::ThinkingDelta { delta }).await;
-                            }
-                            AppStreamEvent::TextDelta { delta } => {
-                                let _ = tx.send(AppEvent::TextDelta { delta }).await;
-                            }
-                            AppStreamEvent::Done => break,
-                        }
-                    } else if matches!(evt, AppStreamEvent::Done) {
-                        break;
-                    }
-                }
-            });
-
-            let llm_result = self
+            let stream_result = self
                 .llm
-                .stream_complete(&all_messages, &specs, &stream_tx)
+                .stream(
+                    &all_messages,
+                    RequestOptions::new().with_tools(specs),
+                )
                 .await;
 
-            drop(stream_tx);
-            let _ = drain_handle.await;
-
-            let result = match llm_result {
-                Ok(r) => r,
+            let (handle, mut rx) = match stream_result {
+                Ok(h) => h,
                 Err(e) => {
                     if stream_to_tui {
                         let _ = event_tx
@@ -459,13 +434,65 @@ impl Agent {
                 }
             };
 
+            // Consume stream events, forward deltas to TUI
+            let fwd_tx = if stream_to_tui {
+                Some(event_tx.clone())
+            } else {
+                None
+            };
+            tokio::spawn(async move {
+                while let Some(evt) = rx.recv().await {
+                    if let Some(ref tx) = fwd_tx {
+                        match evt {
+                            LlmStreamEvent::ThinkingDelta { delta } => {
+                                let _ = tx.send(AppEvent::ThinkingDelta { delta }).await;
+                            }
+                            LlmStreamEvent::TextDelta { delta } => {
+                                let _ = tx.send(AppEvent::TextDelta { delta }).await;
+                            }
+                            LlmStreamEvent::Done(_) => break,
+                        }
+                    } else if matches!(evt, LlmStreamEvent::Done(_)) {
+                        break;
+                    }
+                }
+            });
+
+            let llm_result = match handle.await {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => {
+                    if stream_to_tui {
+                        let _ = event_tx
+                            .send(AppEvent::Error {
+                                message: format!("LLM error: {}", e),
+                            })
+                            .await;
+                    } else {
+                        tracing::error!("LLM error: {}", e);
+                    }
+                    return false;
+                }
+                Err(e) => {
+                    if stream_to_tui {
+                        let _ = event_tx
+                            .send(AppEvent::Error {
+                                message: format!("LLM task failed: {}", e),
+                            })
+                            .await;
+                    } else {
+                        tracing::error!("LLM task failed: {}", e);
+                    }
+                    return false;
+                }
+            };
+
             self.iteration += 1;
 
-            let StreamFinal {
+            let LlmResponse {
                 reasoning,
                 content,
                 tool_calls,
-            } = result;
+            } = llm_result;
 
             if self.run_state.accumulate_history() {
                 self.history

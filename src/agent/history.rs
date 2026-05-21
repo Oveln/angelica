@@ -255,7 +255,6 @@ mod tests {
             Some("thinking...".to_string()),
             Some(vec![crate::llm::types::ToolCall {
                 id: "call_1".to_string(),
-                call_type: "function".to_string(),
                 function: crate::llm::types::FunctionCall {
                     name: "read_file".to_string(),
                     arguments: r#"{"path":"test.rs"}"#.to_string(),

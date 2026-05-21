@@ -8,6 +8,13 @@ reasoning_effort = "high"
 max_iterations = 15
 # role_immersion = true    # true = 强制开启, false = 强制关闭, 不设置 = 自动检测
 
+# Named profiles — unset fields inherit from [llm] above.
+# [llm.profiles.fast]
+# model = "deepseek-v4-flash"
+# temperature = 0.3
+# thinking = false
+# max_tokens = 2048
+
 [memory]
 memory_path = "data/MEMORY.md"
 profile_path = "data/profile.md"

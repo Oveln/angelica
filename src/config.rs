@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::permission::PermissionConfig;
@@ -87,6 +88,25 @@ pub struct LlmConfig {
     pub max_iterations: u32,
     #[serde(default)]
     pub role_immersion: Option<bool>,
+    #[serde(default)]
+    pub profiles: HashMap<String, ProfileConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ProfileConfig {
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub thinking: Option<bool>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 impl Default for LlmConfig {
@@ -101,6 +121,7 @@ impl Default for LlmConfig {
             api_key: None,
             max_iterations: default_max_iterations(),
             role_immersion: None,
+            profiles: HashMap::new(),
         }
     }
 }

@@ -18,8 +18,6 @@ pub struct ChatMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
-    #[serde(rename = "type")]
-    pub call_type: String,
     pub function: FunctionCall,
 }
 
@@ -31,8 +29,6 @@ pub struct FunctionCall {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSpec {
-    #[serde(rename = "type")]
-    pub spec_type: String,
     pub function: ToolFunction,
 }
 
@@ -48,7 +44,6 @@ pub struct ToolFunction {
 impl ToolSpec {
     pub fn new(name: &str, description: &str, parameters: serde_json::Value) -> Self {
         Self {
-            spec_type: "function".to_string(),
             function: ToolFunction {
                 name: name.to_string(),
                 description: Some(description.to_string()),
@@ -87,7 +82,6 @@ mod tests {
             reasoning_content: Some("thinking...".to_string()),
             tool_calls: Some(vec![ToolCall {
                 id: "call_123".to_string(),
-                call_type: "function".to_string(),
                 function: FunctionCall {
                     name: "run_command".to_string(),
                     arguments: r#"{"command":"ls"}"#.to_string(),
