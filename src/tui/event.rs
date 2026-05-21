@@ -7,6 +7,10 @@ use super::types::*;
 
 impl AppState {
     pub fn handle_event(&mut self, event: &AppEvent) {
+        if matches!(self.mode, AppMode::Welcome) {
+            self.load_conversation();
+        }
+
         match event {
             AppEvent::ThinkingDelta { delta } => {
                 self.thinking_buffer.push_str(delta);

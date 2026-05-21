@@ -110,11 +110,10 @@ pub struct AppState {
 
     // Mode (carries mode-specific state)
     pub mode: crate::tui::mode::AppMode,
-
-    // Flags
     pub is_streaming: bool,
     pub should_quit: bool,
     pub model_name: String,
+    pub conversation_path: String,
 
     // Grouped state
     pub display: DisplayConfig,
@@ -131,10 +130,11 @@ impl Default for AppState {
             text_buffer: String::new(),
             input: InputBuffer::new(),
             queued_messages: VecDeque::new(),
-            mode: crate::tui::mode::AppMode::Chat,
+            mode: crate::tui::mode::AppMode::Welcome,
             is_streaming: false,
             should_quit: false,
             model_name: String::new(),
+            conversation_path: String::new(),
             display: DisplayConfig {
                 thinking_visible: true,
                 verbosity: Verbosity::Normal,
@@ -168,6 +168,102 @@ impl AppState {
             model_name,
             ..Self::default()
         }
+    }
+
+    pub fn with_conversation_path(mut self, path: String) -> Self {
+        self.conversation_path = path;
+        self
+    }
+
+    pub fn load_conversation(&mut self) {
+        use crate::agent::history::History;
+        use crate::tui::types::DisplayMessage;
+
+        let path = std::path::PathBuf::from(&self.conversation_path);
+        if !path.exists() {
+            self.mode = crate::tui::mode::AppMode::Chat;
+            return;
+        }
+
+        match History::load(path) {
+            Ok(history) => {
+                for msg in history.messages() {
+                    match msg.role.as_str() {
+                        "user" => {
+                            let content = msg.content.as_deref().unwrap_or("");
+                            if content.is_empty() {
+                                continue;
+                            }
+                            self.messages.push(DisplayMessage::Chat {
+                                role: "user".to_string(),
+                                content: content.to_string(),
+                                thinking: None,
+                                collapsed: false,
+                                hidden: false,
+                            });
+                        }
+                        "assistant" => {
+                            let content = msg.content.as_deref().unwrap_or("");
+                            if content.is_empty() && msg.tool_calls.is_none() {
+                                continue;
+                            }
+                            if !content.is_empty() {
+                                self.messages.push(DisplayMessage::Chat {
+                                    role: "assistant".to_string(),
+                                    content: content.to_string(),
+                                    thinking: msg.reasoning_content.clone(),
+                                    collapsed: msg.reasoning_content.is_some(),
+                                    hidden: false,
+                                });
+                            }
+                            if let Some(tool_calls) = &msg.tool_calls {
+                                for tc in tool_calls {
+                                    let display = format!(
+                                        "{}({})",
+                                        tc.function.name,
+                                        truncate_args(&tc.function.arguments)
+                                    );
+                                    self.messages.push(DisplayMessage::Tool {
+                                        call_id: tc.id.clone(),
+                                        name: tc.function.name.clone(),
+                                        args_display: display,
+                                        result: None,
+                                        diff_preview: None,
+                                        collapsed: true,
+                                        hidden: false,
+                                    });
+                                }
+                            }
+                        }
+                        "tool" => {
+                            if let Some(last_tool) = self
+                                .messages
+                                .iter_mut()
+                                .rev()
+                                .find(|m| matches!(m, DisplayMessage::Tool { call_id, .. } if *call_id == msg.tool_call_id.as_deref().unwrap_or("")))
+                            {
+                                if let DisplayMessage::Tool { result, .. } = last_tool {
+                                    *result = Some(
+                                        msg.content
+                                            .as_deref()
+                                            .unwrap_or("")
+                                            .chars()
+                                            .take(200)
+                                            .collect(),
+                                    );
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                self.scroll.to_bottom();
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load conversation: {}", e);
+            }
+        }
+        self.mode = crate::tui::mode::AppMode::Chat;
     }
 
     pub fn theme(&self) -> &Theme {
@@ -312,6 +408,15 @@ fn find_tool_by_call_id_mut<'a>(
         DisplayMessage::Tool { call_id: cid, .. } => cid == call_id,
         _ => false,
     })
+}
+
+fn truncate_args(args: &str) -> String {
+    let s: String = args.chars().take(60).collect();
+    if args.len() > 60 {
+        format!("{}...", s)
+    } else {
+        s
+    }
 }
 
 const QUIET_TOOLS: &[&str] = &[

@@ -17,6 +17,7 @@ pub async fn run_tui(
     mut app_event_rx: mpsc::Receiver<AppEvent>,
     user_action_tx: mpsc::Sender<UserAction>,
     model_name: String,
+    conversation_path: String,
 ) -> anyhow::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -27,7 +28,7 @@ pub async fn run_tui(
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let mut state = AppState::new(model_name);
+    let mut state = AppState::new(model_name).with_conversation_path(conversation_path);
     let mut reader = EventStream::new();
     let mut was_hovering_toggle = false;
     let drag_scroll_sleep = tokio::time::sleep(std::time::Duration::MAX);
@@ -167,6 +168,11 @@ async fn handle_key(
         if let mode::slash::SlashAction::ExecuteCommand(name) = action {
             mode::execute_slash_command(state, &name, tx).await;
         }
+        return;
+    }
+
+    if matches!(state.mode, AppMode::Welcome) {
+        state.load_conversation();
         return;
     }
 

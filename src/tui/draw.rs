@@ -20,6 +20,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
     let status_height: u16 = 1;
 
     let input_area_height = match &state.mode {
+        AppMode::Welcome => 3,
         AppMode::Approval(a) => {
             let feedback_bonus = if a.selected == ApprovalChoice::EditFeedback {
                 3
@@ -40,12 +41,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         ])
         .split(f.area());
 
-    let show_welcome = state.messages.is_empty()
-        && state.thinking_buffer.is_empty()
-        && state.text_buffer.is_empty()
-        && !state.is_streaming;
-
-    if show_welcome {
+    if matches!(state.mode, AppMode::Welcome) {
         draw_welcome(f, &theme, chunks[0]);
     } else {
         draw_messages(
@@ -57,6 +53,9 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
     }
 
     match &state.mode {
+        AppMode::Welcome => {
+            draw_input(f, state, chunks[1], &theme);
+        }
         AppMode::Approval(a) => {
             let has_feedback = a.selected == ApprovalChoice::EditFeedback;
             let mut constraints = vec![Constraint::Length(2)];
@@ -116,8 +115,7 @@ fn draw_welcome(f: &mut Frame, theme: &Theme, area: Rect) {
     let logo_height = logo.len() as u16;
     let tagline = APP_TAGLINE;
     let tips = [
-        "Type a message to start a conversation",
-        "/ for commands  \u{2502}  ? for help",
+        "Press any key to wake up",
     ];
 
     let total_content = logo_height + 1 + 1 + 1 + tips.len() as u16;
@@ -176,6 +174,7 @@ fn draw_welcome(f: &mut Frame, theme: &Theme, area: Rect) {
 
 fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
     let mode_indicator = match &state.mode {
+        AppMode::Welcome => "\u{25CB} sleeping",
         AppMode::Chat => "\u{25CB} idle",
         AppMode::Streaming => "\u{25CF} streaming",
         AppMode::Approval(_) => "\u{25D0} approval",

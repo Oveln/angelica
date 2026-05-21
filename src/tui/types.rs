@@ -39,11 +39,6 @@ pub static BUILTIN_COMMANDS: &[SlashCommand] = &[
         description: "Show available commands",
     },
     SlashCommand {
-        name: "clear",
-        aliases: &[],
-        description: "Clear conversation history",
-    },
-    SlashCommand {
         name: "quit",
         aliases: &["q"],
         description: "Quit the application",

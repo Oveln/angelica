@@ -47,12 +47,13 @@ async fn main() -> anyhow::Result<()> {
         mpsc::channel::<angelica::agent::events::UserAction>(256);
 
     let model_name = config.llm.model.clone();
+    let conversation_path = config.state.conversation_path.clone();
     let config_clone = config;
     let agent_handle = tokio::spawn(async move {
         angelica::agent::run(config_clone, user_action_rx, app_event_tx).await;
     });
 
-    angelica::tui::app::run_tui(app_event_rx, user_action_tx, model_name).await?;
+    angelica::tui::app::run_tui(app_event_rx, user_action_tx, model_name, conversation_path).await?;
 
     agent_handle.await?;
 

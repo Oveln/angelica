@@ -72,6 +72,7 @@ impl ApprovalChoice {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppMode {
+    Welcome,
     Chat,
     Streaming,
     SlashMenu(SlashMenuState),
