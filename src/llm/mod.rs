@@ -2,7 +2,14 @@ pub mod patch;
 pub mod types;
 
 use futures::StreamExt;
-use reqwest::Client;
+use genai::chat::{
+    ChatMessage as GenaiMessage, ChatOptions, ChatRequest, ChatStreamEvent, ContentPart,
+    MessageContent, ReasoningEffort, StreamChunk, Tool as GenaiTool, ToolCall as GenaiToolCall,
+    ToolResponse,
+};
+use genai::resolver::{AuthData, AuthResolver, Endpoint, ServiceTargetResolver};
+use std::sync::Arc;
+use genai::Client;
 use tokio::sync::mpsc;
 
 use crate::config::LlmConfig;
@@ -10,13 +17,17 @@ use crate::llm::types::*;
 
 pub struct LlmClient {
     client: Client,
-    config: LlmConfig,
-    api_key: String,
+    model: String,
+    thinking: bool,
+    temperature: f32,
+    max_tokens: u32,
+    reasoning_effort: String,
+    configured: bool,
 }
 
 impl LlmClient {
     pub fn is_configured(&self) -> bool {
-        !self.api_key.is_empty()
+        self.configured
     }
 
     pub fn new(config: &LlmConfig) -> Self {
@@ -26,10 +37,33 @@ impl LlmClient {
             .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok())
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .unwrap_or_default();
+
+        let configured = !api_key.is_empty();
+
+        let key = api_key;
+        let base_url: Arc<str> = config.base_url.clone().into();
+
+        let client = Client::builder()
+            .with_auth_resolver(AuthResolver::from_resolver_fn(move |_kind| {
+                Ok(Some(AuthData::from_single(key.clone())))
+            }))
+            .with_service_target_resolver(
+                ServiceTargetResolver::from_resolver_fn(
+                    move |mut target: genai::ServiceTarget| {
+                    target.endpoint = Endpoint::from_owned(base_url.clone());
+                    Ok(target)
+                }),
+            )
+            .build();
+
         Self {
-            client: Client::new(),
-            config: config.clone(),
-            api_key,
+            client,
+            model: config.model.clone(),
+            thinking: config.thinking,
+            temperature: config.temperature,
+            max_tokens: config.max_tokens,
+            reasoning_effort: config.reasoning_effort.clone(),
+            configured,
         }
     }
 
@@ -39,97 +73,182 @@ impl LlmClient {
         tools: &[ToolSpec],
         event_tx: &mpsc::Sender<AppStreamEvent>,
     ) -> anyhow::Result<StreamFinal> {
-        let mut payload = serde_json::json!({
-            "model": self.config.model,
-            "messages": messages,
-            "max_tokens": self.config.max_tokens,
-            "stream": true,
-        });
+        let genai_messages: Vec<GenaiMessage> = messages
+            .iter()
+            .map(convert_message)
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
-        if self.config.thinking {
-            payload["thinking"] = serde_json::json!({ "type": "enabled" });
-            payload["reasoning_effort"] = serde_json::json!(self.config.reasoning_effort);
-        } else {
-            payload["temperature"] = serde_json::json!(self.config.temperature);
-        }
+        let mut chat_req = ChatRequest::new(genai_messages);
 
         if !tools.is_empty() {
-            payload["tools"] = serde_json::json!(tools);
+            let genai_tools: Vec<GenaiTool> = tools
+                .iter()
+                .map(|t| {
+                    let mut tool = GenaiTool::new(&t.function.name);
+                    if let Some(desc) = &t.function.description {
+                        tool = tool.with_description(desc);
+                    }
+                    if let Some(params) = &t.function.parameters {
+                        tool = tool.with_schema(params.clone());
+                    }
+                    tool
+                })
+                .collect();
+            chat_req = chat_req.with_tools(genai_tools);
         }
 
-        let url = format!(
-            "{}/chat/completions",
-            self.config.base_url.trim_end_matches('/')
-        );
+        let mut options = ChatOptions::default()
+            .with_max_tokens(self.max_tokens)
+            .with_capture_content(true)
+            .with_capture_reasoning_content(true)
+            .with_capture_tool_calls(true);
 
-        let response = self
-            .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&payload)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("API error {}: {}", status, body));
-        }
-
-        let mut accumulator = StreamAccumulator::new();
-        let mut stream = response.bytes_stream();
-        let mut line_buf = String::new();
-
-        loop {
-            let chunk = match stream.next().await {
-                Some(Ok(data)) => data,
-                Some(Err(e)) => return Err(anyhow::anyhow!("Stream error: {}", e)),
-                None => break,
+        if self.thinking {
+            let effort = match self.reasoning_effort.as_str() {
+                "low" => ReasoningEffort::Low,
+                "medium" => ReasoningEffort::Medium,
+                "high" => ReasoningEffort::High,
+                _ => ReasoningEffort::High,
             };
+            options = options.with_reasoning_effort(effort);
+        } else {
+            options = options
+                .with_temperature(self.temperature as f64)
+                .with_extra_body(serde_json::json!({ "thinking": { "type": "disabled" } }));
+        }
 
-            line_buf.push_str(&String::from_utf8_lossy(&chunk));
+        let stream_response = self
+            .client
+            .exec_chat_stream(&self.model, chat_req, Some(&options))
+            .await
+            .map_err(|e| anyhow::anyhow!("LLM error: {}", e))?;
 
-            while let Some(pos) = line_buf.find('\n') {
-                let line = line_buf[..pos].trim_end_matches('\r').trim().to_string();
-                line_buf.drain(..=pos);
+        let mut thinking = String::new();
+        let mut content = String::new();
+        let mut tool_calls: Vec<GenaiToolCall> = Vec::new();
 
-                if !line.starts_with("data: ") {
-                    continue;
+        let mut stream = stream_response.stream;
+
+        while let Some(event_result) = stream.next().await {
+            let event = event_result.map_err(|e| anyhow::anyhow!("Stream error: {}", e))?;
+
+            match event {
+                ChatStreamEvent::Chunk(StreamChunk { content: text }) if !text.is_empty() => {
+                    content.push_str(&text);
+                    let _ = event_tx
+                        .send(AppStreamEvent::TextDelta { delta: text })
+                        .await;
                 }
-
-                let data = &line[6..];
-                if data == "[DONE]" {
-                    let final_result = accumulator.finalize();
-                    let _ = event_tx.send(AppStreamEvent::Done).await;
-                    return Ok(final_result);
+                ChatStreamEvent::ReasoningChunk(StreamChunk { content: text }) if !text.is_empty() => {
+                    thinking.push_str(&text);
+                    let _ = event_tx
+                        .send(AppStreamEvent::ThinkingDelta { delta: text })
+                        .await;
                 }
-
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                    if let Some(choices) = parsed.get("choices").and_then(|c| c.as_array()) {
-                        if let Some(choice) = choices.first() {
-                            if let Some(delta) = choice.get("delta") {
-                                let events = accumulator.process_delta(delta);
-                                for evt in events {
-                                    let _ = event_tx.send(evt).await;
-                                }
-                            }
+                ChatStreamEvent::ToolCallChunk(_chunk) => {
+                    // Tool calls are captured via capture_tool_calls in StreamEnd
+                }
+                ChatStreamEvent::End(end) => {
+                    // Prefer captured_reasoning_content over stream-accumulated chunks
+                    // as it's the canonical complete version from the API.
+                    if let Some(reasoning) = end.captured_reasoning_content {
+                        thinking = reasoning;
+                    }
+                    if let Some(mc) = end.captured_content {
+                        tool_calls = mc.tool_calls().into_iter().cloned().collect();
+                        if content.is_empty() {
+                            content = mc.into_first_text().unwrap_or_default();
                         }
                     }
                 }
+                _ => {}
             }
         }
 
-        if !line_buf.trim().is_empty() {
-            tracing::warn!(
-                "SSE stream ended with partial line: {} bytes remaining",
-                line_buf.len()
-            );
-        }
-
-        let final_result = accumulator.finalize();
         let _ = event_tx.send(AppStreamEvent::Done).await;
-        Ok(final_result)
+
+        let our_tool_calls = if tool_calls.is_empty() {
+            None
+        } else {
+            Some(
+                tool_calls
+                    .into_iter()
+                    .map(|tc| ToolCall {
+                        id: tc.call_id,
+                        call_type: "function".to_string(),
+                        function: FunctionCall {
+                            name: tc.fn_name,
+                            arguments: serde_json::to_string(&tc.fn_arguments)
+                                .unwrap_or_else(|_| "{}".to_string()),
+                        },
+                    })
+                    .collect(),
+            )
+        };
+
+        Ok(StreamFinal {
+            reasoning: if thinking.is_empty() {
+                None
+            } else {
+                Some(thinking)
+            },
+            content: if content.is_empty() {
+                None
+            } else {
+                Some(content)
+            },
+            tool_calls: our_tool_calls,
+        })
+    }
+}
+
+fn convert_message(msg: &ChatMessage) -> anyhow::Result<GenaiMessage> {
+    match msg.role.as_str() {
+        "system" => Ok(GenaiMessage::system(
+            msg.content.clone().unwrap_or_default(),
+        )),
+        "user" => Ok(GenaiMessage::user(
+            msg.content.clone().unwrap_or_default(),
+        )),
+        "assistant" => {
+            if let Some(tcs) = &msg.tool_calls {
+                let genai_tcs: Vec<GenaiToolCall> = tcs
+                    .iter()
+                    .map(|tc| {
+                        Ok(GenaiToolCall {
+                            call_id: tc.id.clone(),
+                            fn_name: tc.function.name.clone(),
+                            fn_arguments: serde_json::from_str(&tc.function.arguments)?,
+                            thought_signatures: None,
+                        })
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()?;
+
+                let mut parts: Vec<ContentPart> = Vec::new();
+                if let Some(text) = &msg.content {
+                    if !text.is_empty() {
+                        parts.push(ContentPart::Text(text.clone()));
+                    }
+                }
+                parts.extend(genai_tcs.into_iter().map(ContentPart::ToolCall));
+
+                let message = GenaiMessage::assistant(MessageContent::from_parts(parts))
+                    .with_reasoning_content(msg.reasoning_content.clone());
+                Ok(message)
+            } else {
+                Ok(GenaiMessage::assistant(
+                    msg.content.clone().unwrap_or_default(),
+                ))
+            }
+        }
+        "tool" => {
+            let response = ToolResponse::new(
+                msg.tool_call_id.clone().unwrap_or_default(),
+                msg.content.clone().unwrap_or_default(),
+            );
+            Ok(GenaiMessage::from(response))
+        }
+        _ => Err(anyhow::anyhow!("Unknown message role: {}", msg.role)),
     }
 }
 
@@ -141,15 +260,6 @@ pub enum AppStreamEvent {
     TextDelta {
         delta: String,
     },
-    ToolCallStart {
-        index: usize,
-        id: String,
-        name: String,
-    },
-    ToolCallArgsDelta {
-        index: usize,
-        delta: String,
-    },
     Done,
 }
 
@@ -157,134 +267,4 @@ pub struct StreamFinal {
     pub reasoning: Option<String>,
     pub content: Option<String>,
     pub tool_calls: Option<Vec<ToolCall>>,
-}
-
-struct StreamAccumulator {
-    thinking: String,
-    content: String,
-    tool_calls: Vec<PartialToolCall>,
-}
-
-#[derive(Default)]
-struct PartialToolCall {
-    id: Option<String>,
-    function_name: String,
-    function_arguments: String,
-}
-
-impl StreamAccumulator {
-    fn new() -> Self {
-        Self {
-            thinking: String::new(),
-            content: String::new(),
-            tool_calls: Vec::new(),
-        }
-    }
-
-    fn process_delta(&mut self, delta: &serde_json::Value) -> Vec<AppStreamEvent> {
-        let mut events = Vec::new();
-
-        if let Some(rc) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
-            self.thinking.push_str(rc);
-            events.push(AppStreamEvent::ThinkingDelta {
-                delta: rc.to_string(),
-            });
-        }
-
-        if let Some(c) = delta.get("content").and_then(|v| v.as_str()) {
-            self.content.push_str(c);
-            events.push(AppStreamEvent::TextDelta {
-                delta: c.to_string(),
-            });
-        }
-
-        if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
-            for tc in tcs {
-                let idx = tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                while self.tool_calls.len() <= idx {
-                    self.tool_calls.push(PartialToolCall::default());
-                }
-                let partial = &mut self.tool_calls[idx];
-
-                let mut new_id = None;
-                let mut new_name = None;
-
-                if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
-                    partial.id = Some(id.to_string());
-                    new_id = Some(id.to_string());
-                }
-                if let Some(f) = tc.get("function") {
-                    if let Some(name) = f.get("name").and_then(|v| v.as_str()) {
-                        partial.function_name.push_str(name);
-                        new_name = Some(name.to_string());
-                    }
-                    if let Some(args_val) = f.get("arguments") {
-                        match args_val {
-                            serde_json::Value::String(s) => {
-                                partial.function_arguments.push_str(s);
-                                events.push(AppStreamEvent::ToolCallArgsDelta {
-                                    index: idx,
-                                    delta: s.clone(),
-                                });
-                            }
-                            other => {
-                                let serialized = other.to_string();
-                                partial.function_arguments =
-                                    partial.function_arguments.clone() + &serialized;
-                                events.push(AppStreamEvent::ToolCallArgsDelta {
-                                    index: idx,
-                                    delta: serialized,
-                                });
-                            }
-                        }
-                    }
-                }
-
-                if let (Some(id), Some(name)) = (new_id, new_name) {
-                    events.push(AppStreamEvent::ToolCallStart {
-                        index: idx,
-                        id,
-                        name,
-                    });
-                }
-            }
-        }
-
-        events
-    }
-
-    fn finalize(self) -> StreamFinal {
-        let reasoning = if self.thinking.is_empty() {
-            None
-        } else {
-            Some(self.thinking)
-        };
-        let content = if self.content.is_empty() {
-            None
-        } else {
-            Some(self.content)
-        };
-        let tool_calls = if self.tool_calls.is_empty() {
-            None
-        } else {
-            Some(
-                self.tool_calls
-                    .into_iter()
-                    .map(|tc| ToolCall {
-                        id: tc.id.unwrap_or_default(),
-                        call_type: "function".to_string(),
-                        function: FunctionCall {
-                            name: tc.function_name,
-                            arguments: tc.function_arguments,
-                        },
-                    })
-                    .collect(),
-            )
-        };
-        StreamFinal {
-            reasoning,
-            content,
-            tool_calls,
-        }
-    }
 }

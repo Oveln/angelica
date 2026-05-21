@@ -427,8 +427,6 @@ impl Agent {
                             AppStreamEvent::TextDelta { delta } => {
                                 let _ = tx.send(AppEvent::TextDelta { delta }).await;
                             }
-                            AppStreamEvent::ToolCallStart { .. }
-                            | AppStreamEvent::ToolCallArgsDelta { .. } => {}
                             AppStreamEvent::Done => break,
                         }
                     } else if matches!(evt, AppStreamEvent::Done) {

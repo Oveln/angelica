@@ -58,27 +58,6 @@ impl ToolSpec {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct StreamDelta {
-    pub reasoning_delta: Option<String>,
-    pub content_delta: Option<String>,
-    pub tool_calls: Option<Vec<ToolCallDelta>>,
-    pub finish_reason: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ToolCallDelta {
-    pub index: usize,
-    pub id: Option<String>,
-    pub function: Option<FunctionCallDelta>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FunctionCallDelta {
-    pub name: Option<String>,
-    pub arguments: Option<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
