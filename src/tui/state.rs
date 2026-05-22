@@ -141,6 +141,8 @@ pub struct AppState {
     pub mouse: MouseState,
     pub fatigue: FatigueState,
     pub usage: UsageMetrics,
+    pub last_total_tokens: u64,
+    pub last_response_usage: Option<UsageMetrics>,
     pub usage_stats_path: std::path::PathBuf,
     pub cached_usage_sessions: Option<Vec<crate::usage::SessionUsage>>,
 }
@@ -183,6 +185,8 @@ impl Default for AppState {
             },
             fatigue: FatigueState::default(),
             usage: UsageMetrics::default(),
+            last_total_tokens: 0,
+            last_response_usage: None,
             usage_stats_path: std::path::PathBuf::from("data/usage.jsonl"),
             cached_usage_sessions: None,
         }
@@ -232,6 +236,8 @@ impl AppState {
                                 thinking: None,
                                 collapsed: false,
                                 hidden: false,
+                                token_usage: None,
+                                user_tokens: None,
                             });
                         }
                         "assistant" => {
@@ -246,6 +252,8 @@ impl AppState {
                                     thinking: msg.reasoning_content.clone(),
                                     collapsed: msg.reasoning_content.is_some(),
                                     hidden: false,
+                                    token_usage: None,
+                                    user_tokens: None,
                                 });
                             }
                             if let Some(tool_calls) = &msg.tool_calls {
@@ -313,6 +321,7 @@ impl AppState {
                 cache_hit_tokens: last.cache_hit_tokens,
                 cache_miss_tokens: last.cache_miss_tokens,
             };
+            self.last_total_tokens = last.total_tokens;
         }
     }
 
@@ -321,12 +330,19 @@ impl AppState {
     }
 
     pub fn add_chat(&mut self, role: &str, content: &str, thinking: Option<String>) {
+        let token_usage = if role == "assistant" {
+            self.last_response_usage.take()
+        } else {
+            None
+        };
         self.messages.push(DisplayMessage::Chat {
             role: role.to_string(),
             content: content.to_string(),
             thinking,
             collapsed: false,
             hidden: false,
+            token_usage,
+            user_tokens: None,
         });
     }
 
@@ -476,7 +492,6 @@ const QUIET_TOOLS: &[&str] = &[
     "edit_memory",
     "edit_profile",
 ];
-
 
 /// Strip the per-turn baked context from a user message.
 /// The baked prefix is separated from the actual user text by `\n\n`.

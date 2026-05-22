@@ -1,5 +1,7 @@
 pub use crate::tui::mode::{AppMode, ApprovalChoice};
 
+use crate::usage::UsageMetrics;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verbosity {
     Normal,
@@ -83,6 +85,8 @@ pub enum DisplayMessage {
         thinking: Option<String>,
         collapsed: bool,
         hidden: bool,
+        token_usage: Option<UsageMetrics>,
+        user_tokens: Option<u64>,
     },
     Tool {
         call_id: String,

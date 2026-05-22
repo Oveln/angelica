@@ -1,3 +1,5 @@
+use crate::usage::UsageMetrics;
+
 mod cards;
 mod text;
 
@@ -42,17 +44,24 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
                 content,
                 thinking,
                 collapsed,
+                token_usage,
+                user_tokens,
                 ..
             } => match role.as_str() {
-                "user" => render_glyph_lines(
-                    &mut lines,
-                    content,
-                    USER_GLYPH,
-                    theme.user,
-                    theme.user,
-                    theme.rail,
-                    terminal_width,
-                ),
+                "user" => {
+                    render_glyph_lines(
+                        &mut lines,
+                        content,
+                        USER_GLYPH,
+                        theme.user,
+                        theme.user,
+                        theme.rail,
+                        terminal_width,
+                    );
+                    if let Some(ut) = user_tokens {
+                        render_user_usage(&mut lines, *ut, theme);
+                    }
+                }
                 "assistant" => {
                     render_assistant_message(
                         &mut lines,
@@ -61,6 +70,9 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
                         thinking.as_deref(),
                         terminal_width,
                     );
+                    if let Some(usage) = token_usage {
+                        render_response_usage(&mut lines, usage, theme);
+                    }
                 }
                 "system" => {
                     render_system_message(&mut lines, content, *collapsed, theme, terminal_width);
@@ -221,6 +233,47 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
         text: Text::from(lines),
         click_ranges,
         line_texts,
+    }
+}
+
+fn render_user_usage(lines: &mut Vec<Line>, user_tokens: u64, theme: &crate::tui::theme::Theme) {
+    let label = format_token_count(user_tokens);
+    lines.push(Line::from(Span::styled(
+        format!("{}  {} tokens", RAIL, label),
+        Style::default().fg(theme.muted),
+    )));
+}
+
+fn render_response_usage(
+    lines: &mut Vec<Line>,
+    usage: &UsageMetrics,
+    theme: &crate::tui::theme::Theme,
+) {
+    let in_t = format_token_count(usage.prompt_tokens);
+    let out_t = format_token_count(usage.completion_tokens);
+    let mut parts = vec![format!("in {}  out {}", in_t, out_t)];
+    if usage.reasoning_tokens > 0 {
+        parts.push(format!(
+            "think {}",
+            format_token_count(usage.reasoning_tokens)
+        ));
+    }
+    let cache_total = usage.cache_hit_tokens + usage.cache_miss_tokens;
+    if cache_total > 0 {
+        parts.push(format!("cache {:.0}%", usage.cache_hit_rate() * 100.0));
+    }
+    let summary = parts.join("  \u{2502}  ");
+    lines.push(Line::from(Span::styled(
+        format!("{}  {}", RAIL, summary),
+        Style::default().fg(theme.muted),
+    )));
+}
+
+fn format_token_count(tokens: u64) -> String {
+    if tokens >= 1000 {
+        format!("{:.1}k", tokens as f64 / 1000.0)
+    } else {
+        format!("{}", tokens)
     }
 }
 
