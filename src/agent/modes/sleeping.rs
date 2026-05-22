@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::agent::modes::RunMode;
 use crate::llm::types::{ChatMessage, ToolSpec};
@@ -16,6 +16,7 @@ pub struct SleepingMode {
     tools: ToolRegistry,
     prompt_builder: SleepingPromptBuilder,
     dream: Arc<Mutex<Option<String>>>,
+    cached_system: OnceLock<ChatMessage>,
 }
 
 impl SleepingMode {
@@ -41,6 +42,7 @@ impl SleepingMode {
             tools: reg,
             prompt_builder,
             dream,
+            cached_system: OnceLock::new(),
         }
     }
 
@@ -67,7 +69,9 @@ impl RunMode for SleepingMode {
     }
 
     fn build_system_message(&self, memory: &MemoryManager, skills: &SkillRegistry) -> ChatMessage {
-        self.prompt_builder.build_system_message(memory, skills)
+        self.cached_system
+            .get_or_init(|| self.prompt_builder.build_system_message(memory, skills))
+            .clone()
     }
 
     fn permission_rules(&self) -> Vec<(String, Vec<TargetRule>)> {
