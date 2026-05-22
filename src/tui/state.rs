@@ -221,7 +221,8 @@ impl AppState {
                 for msg in history.messages() {
                     match msg.role.as_str() {
                         "user" => {
-                            let content = msg.content.as_deref().unwrap_or("");
+                            let raw = msg.content.as_deref().unwrap_or("");
+                            let content = strip_baked_context(raw);
                             if content.is_empty() {
                                 continue;
                             }
@@ -475,3 +476,36 @@ const QUIET_TOOLS: &[&str] = &[
     "edit_memory",
     "edit_profile",
 ];
+
+
+/// Strip the per-turn baked context from a user message.
+/// The baked prefix is separated from the actual user text by `\n\n`.
+fn strip_baked_context(content: &str) -> &str {
+    match content.find("\n\n") {
+        Some(pos) => content[pos + 2..].trim_start(),
+        None => content,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_context_basic() {
+        assert_eq!(
+            strip_baked_context("当前时间：2026-05-22\n你的状态：精神饱满。\n\n感觉如何"),
+            "感觉如何"
+        );
+    }
+
+    #[test]
+    fn no_double_newline_passthrough() {
+        assert_eq!(strip_baked_context("普通消息"), "普通消息");
+    }
+
+    #[test]
+    fn empty_after_strip() {
+        assert_eq!(strip_baked_context("上下文\n\n"), "");
+    }
+}

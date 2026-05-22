@@ -175,13 +175,7 @@ impl Agent {
     }
 
     pub fn push_user_message(&mut self, content: &str) {
-        // Ensure system prompt is the first message in history
-        if !self
-            .history
-            .messages()
-            .iter()
-            .any(|m| m.role == "system" && m.name.is_none())
-        {
+        if self.history.messages().is_empty() {
             let system_msg = self.build_system_message();
             self.history.push(system_msg);
         }
