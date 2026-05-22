@@ -135,26 +135,9 @@ impl AppState {
                 self.add_chat("system", "祈芷醒来了，梦的余韵还留在心头。", None);
             }
             AppEvent::UsageUpdate { record } => {
-                let prev_total = self.last_total_tokens;
                 self.last_response_usage = Some(record.metrics);
                 self.usage.accumulate(&record.metrics);
-                self.last_total_tokens = self.usage.total_tokens;
-                let user_tokens = record.metrics.prompt_tokens.saturating_sub(prev_total);
-                if user_tokens > 0 {
-                    // Attach user tokens to the last user message
-                    for msg in self.messages.iter_mut().rev() {
-                        if let super::types::DisplayMessage::Chat {
-                            role,
-                            user_tokens: ut,
-                            ..
-                        } = msg
-                            && role == "user"
-                        {
-                            *ut = Some(user_tokens);
-                            break;
-                        }
-                    }
-                }
+                self.last_total_tokens = record.metrics.total_tokens;
             }
         }
     }

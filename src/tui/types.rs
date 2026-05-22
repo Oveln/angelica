@@ -86,7 +86,6 @@ pub enum DisplayMessage {
         collapsed: bool,
         hidden: bool,
         token_usage: Option<UsageMetrics>,
-        user_tokens: Option<u64>,
     },
     Tool {
         call_id: String,

@@ -237,7 +237,6 @@ impl AppState {
                                 collapsed: false,
                                 hidden: false,
                                 token_usage: None,
-                                user_tokens: None,
                             });
                         }
                         "assistant" => {
@@ -252,8 +251,7 @@ impl AppState {
                                     thinking: msg.reasoning_content.clone(),
                                     collapsed: msg.reasoning_content.is_some(),
                                     hidden: false,
-                                    token_usage: None,
-                                    user_tokens: None,
+                                    token_usage: msg.usage,
                                 });
                             }
                             if let Some(tool_calls) = &msg.tool_calls {
@@ -342,7 +340,6 @@ impl AppState {
             collapsed: false,
             hidden: false,
             token_usage,
-            user_tokens: None,
         });
     }
 

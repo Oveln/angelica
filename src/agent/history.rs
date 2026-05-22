@@ -106,6 +106,7 @@ impl History {
         content: Option<String>,
         reasoning: Option<String>,
         tool_calls: Option<Vec<ToolCall>>,
+        usage: Option<crate::usage::UsageMetrics>,
     ) {
         let reasoning_content = if tool_calls.is_some() {
             reasoning
@@ -120,6 +121,7 @@ impl History {
             tool_calls,
             tool_call_id: None,
             name: None,
+            usage,
         });
     }
 
@@ -131,6 +133,7 @@ impl History {
             tool_calls: None,
             tool_call_id: Some(tool_call_id),
             name: None,
+            usage: None,
         });
     }
 
@@ -226,6 +229,7 @@ mod tests {
                 tool_calls: None,
                 tool_call_id: None,
                 name: Some("user".to_string()),
+                usage: None,
             });
             history.push(ChatMessage {
                 role: "assistant".to_string(),
@@ -234,6 +238,7 @@ mod tests {
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
+                usage: None,
             });
         }
 
@@ -260,6 +265,7 @@ mod tests {
                     arguments: r#"{"path":"test.rs"}"#.to_string(),
                 },
             }]),
+            None,
         );
 
         assert_eq!(history.messages().len(), 1);
@@ -276,6 +282,7 @@ mod tests {
         history.record_assistant(
             Some("done".to_string()),
             Some("thinking...".to_string()),
+            None,
             None,
         );
 
@@ -312,6 +319,7 @@ mod tests {
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
+                usage: None,
             });
         }
         assert!(path.exists());

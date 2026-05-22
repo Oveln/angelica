@@ -1,19 +1,26 @@
-use crate::usage::UsageMetrics;
+//! Message rendering pipeline.
+//!
+//! Converts `DisplayMessage` list into `Text` lines with consistent visual hierarchy:
+//! - Content (user/assistant messages) is prominent
+//! - Tool cards provide structured panels
+//! - Metadata (usage, status) is subtle and non-competitive
 
 mod cards;
+pub(super) mod components;
 mod text;
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use unicode_width::UnicodeWidthStr;
 
 use super::state::AppState;
 use super::theme::{
-    ASSISTANT_GLYPH, CARD_BOT, CARD_MID, CARD_TOP, RAIL, THINKING_RAIL, TOOL_GLYPH, USER_GLYPH,
+    ASSISTANT_GLYPH, CARD_BOT, CARD_MID, CARD_TOP, THINKING_RAIL, TOOL_GLYPH, USER_GLYPH,
 };
 use super::types::{ClickRange, DisplayMessage};
 
 use cards::render_inline_tool;
+use components::{glyph_lines, spacer, usage_line};
 use text::{apply_line_selection, wrap_str};
 
 const TOGGLE_LABEL: &str = "[toggle]";
@@ -29,13 +36,32 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
     let mut lines: Vec<Line> = Vec::new();
     let mut click_ranges: Vec<ClickRange> = Vec::new();
 
+    // Track the role of the previous message to control spacing.
+    // Consecutive messages within the same "turn" (e.g. assistant + tool calls)
+    // get less spacing than messages between different speakers.
+    let mut prev_role: Option<&str> = None;
+
     for (msg_idx, msg) in state.messages.iter().enumerate() {
         if msg.is_hidden() {
             continue;
         }
+
+        // Spacing: different speakers get a full blank line;
+        // same-turn messages (assistant → tool) get a thin separator.
+        let current_role = msg_role(msg);
         if !lines.is_empty() {
-            lines.push(Line::from(""));
+            match (prev_role, current_role) {
+                // Tool following an assistant — same turn, thin separator
+                (Some("assistant"), Some("tool")) | (Some("tool"), Some("tool")) => {
+                    lines.push(spacer());
+                }
+                // Otherwise — full break between speakers
+                _ => {
+                    lines.push(spacer());
+                }
+            }
         }
+        prev_role = current_role;
         let line_count_before = lines.len();
 
         match msg {
@@ -45,22 +71,17 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
                 thinking,
                 collapsed,
                 token_usage,
-                user_tokens,
                 ..
             } => match role.as_str() {
                 "user" => {
-                    render_glyph_lines(
-                        &mut lines,
+                    lines.extend(glyph_lines(
                         content,
                         USER_GLYPH,
                         theme.user,
                         theme.user,
                         theme.rail,
                         terminal_width,
-                    );
-                    if let Some(ut) = user_tokens {
-                        render_user_usage(&mut lines, *ut, theme);
-                    }
+                    ));
                 }
                 "assistant" => {
                     render_assistant_message(
@@ -71,7 +92,7 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
                         terminal_width,
                     );
                     if let Some(usage) = token_usage {
-                        render_response_usage(&mut lines, usage, theme);
+                        lines.push(usage_line(usage, theme, terminal_width));
                     }
                 }
                 "system" => {
@@ -145,20 +166,11 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
     }
 
     if !state.thinking_buffer.is_empty() && state.display.thinking_visible {
-        let glyph_style = Style::default()
-            .fg(theme.assistant)
-            .add_modifier(Modifier::BOLD);
-        lines.push(Line::from(vec![
-            Span::styled(ASSISTANT_GLYPH.to_string(), glyph_style),
-            Span::styled(
-                " thinking\u{2026}",
-                Style::default()
-                    .fg(theme.thinking)
-                    .add_modifier(Modifier::ITALIC),
-            ),
-        ]));
-        let think_w = terminal_width.saturating_sub(UnicodeWidthStr::width(THINKING_RAIL));
+        if !lines.is_empty() {
+            lines.push(spacer());
+        }
         let think_style = Style::default().fg(theme.thinking);
+        let think_w = terminal_width.saturating_sub(UnicodeWidthStr::width(THINKING_RAIL));
         for think_line in state.thinking_buffer.lines() {
             for chunk in wrap_str(think_line, think_w) {
                 lines.push(Line::from(Span::styled(
@@ -170,35 +182,26 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
     }
 
     if !state.text_buffer.is_empty() {
-        if state.thinking_buffer.is_empty() {
-            let glyph_style = Style::default()
-                .fg(theme.assistant)
-                .add_modifier(Modifier::BOLD);
-            lines.push(Line::from(vec![
-                Span::styled(ASSISTANT_GLYPH.to_string(), glyph_style),
-                Span::raw(" "),
-            ]));
+        if !lines.is_empty() && lines.last().is_none_or(|l| !l.spans.is_empty()) {
+            lines.push(spacer());
         }
-        let rail_style = Style::default().fg(theme.rail);
-        let body_style = Style::default().fg(theme.input);
-        let content_w = terminal_width.saturating_sub(UnicodeWidthStr::width(RAIL));
-        for content_line in state.text_buffer.lines() {
-            for chunk in wrap_str(content_line, content_w) {
-                lines.push(Line::from(vec![
-                    Span::styled(RAIL.to_string(), rail_style),
-                    Span::styled(chunk, body_style),
-                ]));
-            }
-        }
+        lines.extend(glyph_lines(
+            &state.text_buffer,
+            ASSISTANT_GLYPH,
+            theme.assistant,
+            theme.input,
+            theme.rail,
+            terminal_width,
+        ));
     }
 
-    if let Some((sl, sc, el, ec)) = state.mouse.selection {
-        let (sel_start_line, sel_start_col, sel_end_line, sel_end_col) =
-            if sl < el || (sl == el && sc <= ec) {
-                (sl, sc, el, ec)
-            } else {
-                (el, ec, sl, sc)
-            };
+    let sel = state.mouse.selection;
+    if let Some((sl, sc, el, ec)) = sel {
+        let (sel_start_line, sel_start_col, sel_end_line, sel_end_col) = if sl <= el {
+            (sl, sc, el, ec)
+        } else {
+            (el, ec, sl, sc)
+        };
 
         for line_idx in sel_start_line..=sel_end_line {
             let sel_col_start = if line_idx == sel_start_line {
@@ -228,7 +231,7 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
         })
         .collect();
 
-    lines.push(Line::from(""));
+    lines.push(spacer());
     BuildResult {
         text: Text::from(lines),
         click_ranges,
@@ -236,100 +239,23 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
     }
 }
 
-fn render_user_usage(lines: &mut Vec<Line>, user_tokens: u64, theme: &crate::tui::theme::Theme) {
-    let label = format_token_count(user_tokens);
-    lines.push(Line::from(Span::styled(
-        format!("{}  {} tokens", RAIL, label),
-        Style::default().fg(theme.muted),
-    )));
-}
-
-fn render_response_usage(
-    lines: &mut Vec<Line>,
-    usage: &UsageMetrics,
-    theme: &crate::tui::theme::Theme,
-) {
-    let in_t = format_token_count(usage.prompt_tokens);
-    let out_t = format_token_count(usage.completion_tokens);
-    let mut parts = vec![format!("in {}  out {}", in_t, out_t)];
-    if usage.reasoning_tokens > 0 {
-        parts.push(format!(
-            "think {}",
-            format_token_count(usage.reasoning_tokens)
-        ));
-    }
-    let cache_total = usage.cache_hit_tokens + usage.cache_miss_tokens;
-    if cache_total > 0 {
-        parts.push(format!("cache {:.0}%", usage.cache_hit_rate() * 100.0));
-    }
-    let summary = parts.join("  \u{2502}  ");
-    lines.push(Line::from(Span::styled(
-        format!("{}  {}", RAIL, summary),
-        Style::default().fg(theme.muted),
-    )));
-}
-
-fn format_token_count(tokens: u64) -> String {
-    if tokens >= 1000 {
-        format!("{:.1}k", tokens as f64 / 1000.0)
-    } else {
-        format!("{}", tokens)
+/// Classify a message into a role category for spacing decisions.
+fn msg_role(msg: &DisplayMessage) -> Option<&str> {
+    match msg {
+        DisplayMessage::Chat { role, .. } => Some(role.as_str()),
+        DisplayMessage::Tool { .. } => Some("tool"),
+        DisplayMessage::Diff { .. } => Some("diff"),
     }
 }
 
 fn toggle_style(theme: &super::theme::Theme, hovered: bool) -> Style {
     let base = Style::default()
         .fg(theme.accent)
-        .bg(theme.panel_bg)
         .add_modifier(Modifier::ITALIC);
     if hovered {
         base.add_modifier(Modifier::UNDERLINED)
     } else {
         base
-    }
-}
-
-fn render_glyph_lines(
-    lines: &mut Vec<Line>,
-    content: &str,
-    glyph: &str,
-    glyph_fg: Color,
-    body_fg: Color,
-    rail_fg: Color,
-    max_w: usize,
-) {
-    let glyph_style = Style::default().fg(glyph_fg).add_modifier(Modifier::BOLD);
-    let rail_style = Style::default().fg(rail_fg);
-    let body_style = Style::default().fg(body_fg);
-    let glyph_prefix_w = UnicodeWidthStr::width(glyph) + 1;
-    let rail_prefix_w = UnicodeWidthStr::width(RAIL);
-
-    for (i, line) in content.lines().enumerate() {
-        let (prefix_w, prefix_span) = if i == 0 {
-            (
-                glyph_prefix_w,
-                Some(Span::styled(glyph.to_string(), glyph_style)),
-            )
-        } else {
-            (
-                rail_prefix_w,
-                Some(Span::styled(RAIL.to_string(), rail_style)),
-            )
-        };
-        let content_w = max_w.saturating_sub(prefix_w);
-        let wrapped = wrap_str(line, content_w);
-        for (wi, chunk) in wrapped.iter().enumerate() {
-            let mut spans = Vec::new();
-            if wi == 0 {
-                if let Some(p) = prefix_span.clone() {
-                    spans.push(p);
-                }
-            } else {
-                spans.push(Span::styled(RAIL.to_string(), rail_style));
-            }
-            spans.push(Span::styled(chunk.clone(), body_style));
-            lines.push(Line::from(spans));
-        }
     }
 }
 
@@ -370,15 +296,14 @@ fn render_assistant_message(
         }
     }
 
-    render_glyph_lines(
-        lines,
+    lines.extend(glyph_lines(
         content,
         ASSISTANT_GLYPH,
         theme.assistant,
         theme.input,
         theme.rail,
         max_w,
-    );
+    ));
 }
 
 fn render_system_message(
@@ -407,14 +332,12 @@ fn render_system_message(
             ]));
         }
         if all_lines.len() > 1 {
-            let expand_bg = theme.status_bg;
             lines.push(Line::from(vec![
                 Span::styled(CARD_BOT.to_string(), style),
                 Span::styled(
                     format!("+{} lines ", all_lines.len().saturating_sub(1)),
                     Style::default()
                         .fg(theme.system)
-                        .bg(expand_bg)
                         .add_modifier(Modifier::ITALIC),
                 ),
             ]));

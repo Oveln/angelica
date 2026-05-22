@@ -79,6 +79,7 @@ impl PromptBuilder for AwakePromptBuilder {
             tool_calls: None,
             tool_call_id: None,
             name: Some("context".to_string()),
+            usage: None,
         }
     }
 }
@@ -160,7 +161,7 @@ profile.md 是关于用户的认知。
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            usage: None,
         }
     }
-
 }

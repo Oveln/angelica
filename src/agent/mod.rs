@@ -192,6 +192,7 @@ impl Agent {
             tool_calls: None,
             tool_call_id: None,
             name: Some("user".to_string()),
+            usage: None,
         });
 
         self.dirty = true;

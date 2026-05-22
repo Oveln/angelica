@@ -44,12 +44,12 @@ impl Agent {
                 reasoning,
                 content,
                 tool_calls,
-                usage: _,
+                usage,
             } = llm_result;
 
             if self.run_state.accumulate_history() {
                 self.history
-                    .record_assistant(content.clone(), reasoning, tool_calls.clone());
+                    .record_assistant(content.clone(), reasoning, tool_calls.clone(), usage);
                 self.dirty = true;
             }
 

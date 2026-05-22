@@ -13,6 +13,8 @@ pub struct ChatMessage {
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::usage::UsageMetrics>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +68,7 @@ mod tests {
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            usage: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"role\":\"user\""));
@@ -89,6 +92,7 @@ mod tests {
             }]),
             tool_call_id: None,
             name: None,
+            usage: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("reasoning_content"));
