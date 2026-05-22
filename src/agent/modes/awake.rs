@@ -133,11 +133,6 @@ impl RunMode for AwakeMode {
         self.prompt_builder.build_system_message(memory, skills)
     }
 
-    fn build_context_message(&self, fatigue_desc: &str, wake_dream: Option<&str>) -> ChatMessage {
-        self.prompt_builder
-            .build_context_message(fatigue_desc, wake_dream)
-    }
-
     fn permission_rules(&self) -> Vec<(String, Vec<TargetRule>)> {
         self.builtin_rules()
     }

@@ -15,7 +15,7 @@ impl Tool for WriteFileTool {
     }
 
     fn description(&self) -> &str {
-        "将内容写入文件。你可以创造、覆盖文件。用户会先看到改动。"
+        "将内容写入文件。会创建新文件或完全覆盖已有文件。写入前需要用户确认。"
     }
 
     fn parameters(&self) -> Value {

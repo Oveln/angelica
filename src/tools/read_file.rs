@@ -18,7 +18,7 @@ impl Tool for ReadFileTool {
     }
 
     fn description(&self) -> &str {
-        "感知一个文件的内容。"
+        "感知一个文件的内容。可以指定行范围。适合查看代码、配置等文本文件。"
     }
 
     fn parameters(&self) -> Value {

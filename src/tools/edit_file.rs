@@ -15,7 +15,7 @@ impl Tool for EditFileTool {
     }
 
     fn description(&self) -> &str {
-        "精确地修改文件中的文字。用户会先看到改动。"
+        "精确替换文件中的一段文字。找到匹配的文本并替换为新文本。适合局部修改，写入前需要用户确认。"
     }
 
     fn parameters(&self) -> Value {

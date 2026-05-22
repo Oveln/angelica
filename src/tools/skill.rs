@@ -23,7 +23,7 @@ impl Tool for SkillTool {
     }
 
     fn description(&self) -> &str {
-        "Use the skill tool to load a skill when a task matches its description."
+        "加载一个技能来获取特定领域的指导。当你遇到匹配某个技能描述的任务时，先加载它。"
     }
 
     fn parameters(&self) -> Value {

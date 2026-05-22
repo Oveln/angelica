@@ -14,7 +14,7 @@ impl Tool for ListDirTool {
     }
 
     fn description(&self) -> &str {
-        "看看一个目录里有什么。"
+        "查看目录下的文件和子目录。了解项目结构或查找文件时使用。"
     }
 
     fn parameters(&self) -> Value {

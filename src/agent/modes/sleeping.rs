@@ -70,10 +70,6 @@ impl RunMode for SleepingMode {
         self.prompt_builder.build_system_message(memory, skills)
     }
 
-    fn build_context_message(&self, _fatigue_desc: &str, _wake_dream: Option<&str>) -> ChatMessage {
-        self.prompt_builder.build_context_message("", None)
-    }
-
     fn permission_rules(&self) -> Vec<(String, Vec<TargetRule>)> {
         Vec::new()
     }

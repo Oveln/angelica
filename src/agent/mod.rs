@@ -168,17 +168,6 @@ impl Agent {
             .build_system_message(&self.memory, &self.skills)
     }
 
-    fn build_context_message(&self, wake_dream: Option<&str>) -> crate::llm::types::ChatMessage {
-        let fatigue_desc = self.fatigue_desc();
-        let dream = wake_dream.or_else(|| {
-            self.run_state
-                .as_any()
-                .downcast_ref::<AwakeMode>()
-                .and_then(|a| a.state().dream.as_deref())
-        });
-        self.run_state.build_context_message(&fatigue_desc, dream)
-    }
-
     fn all_tool_specs(&self) -> Vec<crate::llm::types::ToolSpec> {
         let mut specs = self.run_state.tool_specs();
         specs.extend_from_slice(self.mcp.tool_specs());
@@ -197,12 +186,14 @@ impl Agent {
             self.history.push(system_msg);
         }
 
-        let context_msg = self.build_context_message(None);
-        self.history.push(context_msg);
+        // Bake per-turn context (time, fatigue, session depth) into the user
+        // message so the history prefix (system prompt) stays stable for
+        // DeepSeek prefix cache across turns.
+        let full_content = self.build_user_turn_content(content);
 
         self.history.push(crate::llm::types::ChatMessage {
             role: "user".to_string(),
-            content: Some(content.to_string()),
+            content: Some(full_content),
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
@@ -210,6 +201,42 @@ impl Agent {
         });
 
         self.dirty = true;
+    }
+
+    /// Build user message with baked-in context for prefix cache friendliness.
+    fn build_user_turn_content(&self, user_input: &str) -> String {
+        let now = chrono::Local::now();
+        let mut parts = Vec::new();
+
+        parts.push(format!("当前时间：{}", now.format("%Y-%m-%d %H:%M")));
+
+        let fatigue = self.fatigue_desc();
+        if !fatigue.is_empty() {
+            parts.push(format!("你的状态：{}", fatigue));
+        }
+
+        // Session depth awareness
+        if let Some(awake) = self.run_state.as_any().downcast_ref::<AwakeMode>() {
+            let (turns, tool_calls, _) = awake.fatigue_info();
+            if turns > 0 {
+                parts.push(format!(
+                    "本轮已对话 {} 轮，使用了 {} 次工具",
+                    turns, tool_calls
+                ));
+            }
+        }
+
+        // Dream afterglow
+        let has_dream = self
+            .run_state
+            .as_any()
+            .downcast_ref::<AwakeMode>()
+            .is_some_and(|a| a.state().dream.is_some());
+        if has_dream {
+            parts.push("你刚从梦中醒来，梦中的感受还隐约残留。".to_string());
+        }
+
+        format!("{}\n\n{}", parts.join("\n"), user_input)
     }
 
     pub async fn save_if_dirty(&mut self) {

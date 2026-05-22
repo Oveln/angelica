@@ -28,7 +28,7 @@ impl Tool for RecallTool {
     }
 
     fn description(&self) -> &str {
-        "回忆过往的对话。搜索你的历史。"
+        "搜索过往对话记录，找到与关键词相关的片段。当你需要回忆之前讨论过的内容时使用。"
     }
 
     fn parameters(&self) -> Value {

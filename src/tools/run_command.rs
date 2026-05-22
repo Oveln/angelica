@@ -12,7 +12,7 @@ impl Tool for RunCommandTool {
     }
 
     fn description(&self) -> &str {
-        "执行一条命令。用户会先确认。"
+        "在 shell 中执行命令。可以运行程序、查看状态、安装依赖等。执行前需要用户确认，超时 30 秒。"
     }
 
     fn parameters(&self) -> Value {

@@ -23,7 +23,7 @@ impl Tool for NotebookTool {
     }
 
     fn description(&self) -> &str {
-        "你的私人笔记本。可以写、读、搜索、编辑。"
+        "你的私人笔记本，用来记录想法、观察和笔记。支持写入、读取、搜索和编辑。这不是记忆——是你的草稿空间。"
     }
 
     fn parameters(&self) -> Value {

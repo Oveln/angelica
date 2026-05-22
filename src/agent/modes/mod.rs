@@ -18,7 +18,6 @@ pub trait RunMode: Send + Sync + 'static {
     fn get_tool(&self, name: &str) -> Option<&dyn Tool>;
 
     fn build_system_message(&self, memory: &MemoryManager, skills: &SkillRegistry) -> ChatMessage;
-    fn build_context_message(&self, fatigue_desc: &str, wake_dream: Option<&str>) -> ChatMessage;
 
     fn permission_rules(&self) -> Vec<(String, Vec<TargetRule>)>;
 
