@@ -8,6 +8,9 @@ struct Cli {
     /// Config file path
     #[arg(short, long, default_value = "config.toml")]
     config: PathBuf,
+    /// Enable debug HTTP server
+    #[arg(long)]
+    debug: bool,
 }
 
 #[tokio::main]
@@ -54,11 +57,23 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Debug HTTP server
+    let debug_tx = if cli.debug {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 9914));
+        let default_snapshot = angelica::debug::DebugSnapshot::default();
+        let (tx, rx) = tokio::sync::watch::channel(default_snapshot);
+        tracing::info!("Starting debug server on http://{addr}");
+        angelica::debug::start_debug_server(addr, rx);
+        Some(tx)
+    } else {
+        None
+    };
+
     let model_name = config.llm.model.clone();
     let conversation_path = config.state.conversation_path.clone();
     let config_clone = config;
     let agent_handle = tokio::spawn(async move {
-        angelica::agent::run(config_clone, user_action_rx, app_event_tx).await;
+        angelica::agent::run(config_clone, user_action_rx, app_event_tx, debug_tx).await;
     });
 
     angelica::tui::app::run_tui(app_event_rx, user_action_tx, model_name, conversation_path)

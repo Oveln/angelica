@@ -61,4 +61,12 @@ pub trait RunMode: Send + Sync + 'static {
     fn should_recall(&self) -> bool {
         false
     }
+
+    fn mode_name(&self) -> &'static str;
+    fn fatigue_value(&self) -> f64 { 0.0 }
+    fn fatigue_desc(&self) -> &'static str { "" }
+    fn turns(&self) -> u32 { 0 }
+    fn tool_calls_count(&self) -> u32 { 0 }
+    fn last_prompt_tokens(&self) -> Option<u64> { None }
+    fn last_completion_tokens(&self) -> Option<u64> { None }
 }

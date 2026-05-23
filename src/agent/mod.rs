@@ -71,6 +71,18 @@ use crate::memory::MemoryManager;
 use crate::permission::PermissionEvaluator;
 use crate::skills::SkillRegistry;
 
+pub(crate) fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        let mut end = max_len;
+        while !s.is_char_boundary(end) && end > 0 {
+            end -= 1;
+        }
+        format!("{}\u{2026}", &s[..end])
+    }
+}
+
 pub(crate) struct Agent<S: RunMode> {
     config: Config,
     llm: LlmClient,
@@ -87,6 +99,7 @@ pub(crate) struct Agent<S: RunMode> {
     recall_top_score: f32,
     permissions: PermissionEvaluator,
     approved_path: PathBuf,
+    debug_tx: Option<tokio::sync::watch::Sender<crate::debug::DebugSnapshot>>,
 }
 
 // ── Generic methods for all modes ─────────────────────────────────
@@ -102,6 +115,7 @@ impl<S: RunMode> Agent<S> {
         specs.extend_from_slice(self.mcp.tool_specs());
         specs
     }
+
 
     pub fn reset_iteration(&mut self) {
         self.iteration = 0;
@@ -166,6 +180,7 @@ impl<S: RunMode> Agent<S> {
             recall_top_score: 0.0,
             permissions,
             approved_path: self.approved_path,
+            debug_tx: self.debug_tx,
         }
     }
 }
@@ -174,7 +189,7 @@ impl<S: RunMode> Agent<S> {
 
 impl Agent<AwakeMode> {
     /// Create Agent for normal startup (cold boot or session resume).
-    pub fn awake(config: Config) -> Self {
+    pub fn awake(config: Config, debug_tx: Option<tokio::sync::watch::Sender<crate::debug::DebugSnapshot>>) -> Self {
         let memory = Arc::new(MemoryManager::new(&config.memory));
         let skills = {
             let mut reg = SkillRegistry::new(&config.skills.directory);
@@ -221,6 +236,7 @@ impl Agent<AwakeMode> {
             recall_top_score: 0.0,
             permissions,
             approved_path,
+            debug_tx,
         };
 
         if agent.history.messages().is_empty() {

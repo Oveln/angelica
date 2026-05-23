@@ -493,9 +493,11 @@ const QUIET_TOOLS: &[&str] = &[
 /// Strip the per-turn baked context from a user message.
 /// The baked prefix is separated from the actual user text by `\n\n`.
 fn strip_baked_context(content: &str) -> &str {
-    match content.find("\n\n") {
-        Some(pos) => content[pos + 2..].trim_start(),
-        None => content,
+    const MARKER: &str = "[以下是用户的输入]\n";
+    if let Some(pos) = content.find(MARKER) {
+        content[pos + MARKER.len()..].trim_start()
+    } else {
+        content
     }
 }
 
@@ -506,7 +508,7 @@ mod tests {
     #[test]
     fn strip_context_basic() {
         assert_eq!(
-            strip_baked_context("当前时间：2026-05-22\n你的状态：精神饱满。\n\n感觉如何"),
+            strip_baked_context("[以下为系统上下文，不是用户的输入]\n当前时间：2026-05-22\n你的状态：精神饱满。\n\n[以下是用户的输入]\n感觉如何"),
             "感觉如何"
         );
     }
@@ -518,6 +520,6 @@ mod tests {
 
     #[test]
     fn empty_after_strip() {
-        assert_eq!(strip_baked_context("上下文\n\n"), "");
+        assert_eq!(strip_baked_context("[以下为系统上下文，不是用户的输入]\n上下文\n\n[以下是用户的输入]\n"), "");
     }
 }

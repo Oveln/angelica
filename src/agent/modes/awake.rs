@@ -130,8 +130,8 @@ impl RunMode for AwakeMode {
         self.builtin_rules()
     }
 
-    fn on_context_update(&mut self, prompt_tokens: u64) {
-        self.state.fatigue.update_from_context(prompt_tokens);
+    fn on_context_update(&mut self, total_tokens: u64) {
+        self.state.fatigue.update_from_context(total_tokens);
     }
 
     fn on_turn_complete(&mut self, _content: Option<&str>) {
@@ -162,4 +162,10 @@ impl RunMode for AwakeMode {
     fn should_recall(&self) -> bool {
         true
     }
+
+    fn mode_name(&self) -> &'static str { "awake" }
+    fn fatigue_value(&self) -> f64 { self.state.fatigue.fatigue() }
+    fn fatigue_desc(&self) -> &'static str { self.state.fatigue.describe() }
+    fn turns(&self) -> u32 { self.state.fatigue.turns() }
+    fn tool_calls_count(&self) -> u32 { self.state.fatigue.tool_calls() }
 }

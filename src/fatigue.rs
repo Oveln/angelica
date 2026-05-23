@@ -36,8 +36,12 @@ impl FatigueModel {
         }
     }
 
-    pub fn update_from_context(&mut self, prompt_tokens: u64) {
-        let ratio = (prompt_tokens as f64 / self.max_context_tokens as f64).min(1.0);
+    pub fn update_from_context(&mut self, total_tokens: u64) {
+        let ratio = (total_tokens as f64 / self.max_context_tokens as f64).min(1.0);
+        tracing::info!(
+            "Context tokens: {}, fatigue ratio: {:.3}",
+            total_tokens, ratio
+        );
         self.fatigue = ratio.powf(self.curve_exponent + 1.0);
     }
 

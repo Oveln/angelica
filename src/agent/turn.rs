@@ -8,11 +8,46 @@ use crate::llm::{LlmResponse, LlmStreamEvent, RequestOptions};
 use crate::usage::UsageRecord;
 
 impl<S: RunMode> Agent<S> {
+    pub(super) fn emit_debug_snapshot(&self) {
+        let Some(tx) = &self.debug_tx else {
+            return;
+        };
+        let messages = self.build_turn_messages();
+        let snapshot = crate::debug::DebugSnapshot {
+            mode: self.run_state.mode_name().to_string(),
+            history_messages: messages.len(),
+            tool_count: self.all_tool_specs().len(),
+            iteration: self.iteration,
+            tool_queue_len: self.tool_queue.len(),
+            fatigue: self.run_state.fatigue_value(),
+            fatigue_desc: self.run_state.fatigue_desc().to_string(),
+            turns: self.run_state.turns(),
+            tool_calls: self.run_state.tool_calls_count(),
+            recall_top_score: self.recall_top_score,
+            recall_text_preview: crate::agent::truncate_str(&self.recall_text, 200),
+            last_prompt_tokens: self.run_state.last_prompt_tokens(),
+            last_completion_tokens: self.run_state.last_completion_tokens(),
+            context_messages: messages
+                .into_iter()
+                .map(|m| crate::debug::snapshot::ContextMessage {
+                    role: m.role.clone(),
+                    name: m.name.clone(),
+                    content_length: m.content.as_ref().map(|c| c.chars().count()).unwrap_or(0),
+                    content_preview: m.content.unwrap_or_default(),
+                    tool_calls_count: m.tool_calls.as_ref().map(|tc| tc.len()),
+                    tool_call_id: m.tool_call_id.clone(),
+                })
+                .collect(),
+        };
+        let _ = tx.send(snapshot);
+    }
+
     pub(super) async fn next_llm_response(
         &self,
         event_tx: &mpsc::Sender<AppEvent>,
         stream_to_tui: bool,
     ) -> Option<LlmResponse> {
+        self.emit_debug_snapshot();
         let messages = self.build_turn_messages();
         let tools = self.all_tool_specs();
         tracing::debug!(
@@ -67,7 +102,7 @@ impl<S: RunMode> Agent<S> {
         let history = self.history.messages();
         let has_system = history
             .iter()
-            .any(|m| m.role == "system" && m.name.is_none());
+            .any(|m| m.role == "system");
         let mut messages = Vec::with_capacity(history.len() + usize::from(!has_system));
 
         if !has_system {

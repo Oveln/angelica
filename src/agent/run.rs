@@ -8,8 +8,9 @@ pub async fn run(
     config: crate::config::Config,
     mut user_rx: mpsc::Receiver<UserAction>,
     event_tx: mpsc::Sender<AppEvent>,
+    debug_tx: Option<tokio::sync::watch::Sender<crate::debug::DebugSnapshot>>,
 ) {
-    let mut agent = Agent::<AwakeMode>::awake(config);
+    let mut agent = Agent::<AwakeMode>::awake(config, debug_tx);
 
     if let Err(e) = agent.initialize().await {
         let _ = event_tx
@@ -19,6 +20,8 @@ pub async fn run(
             .await;
         return;
     }
+
+    agent.emit_debug_snapshot();
 
     run_loop(agent, &mut user_rx, &event_tx).await;
 }

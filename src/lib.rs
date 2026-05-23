@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod debug;
 pub mod config;
 pub mod data_git;
 pub mod embedding;

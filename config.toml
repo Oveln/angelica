@@ -46,7 +46,7 @@ default = "ask"                  # ask, allow, deny
 # action = "allow"
 
 [fatigue]
-max_context_tokens = 120000
+max_context_tokens = 80000
 curve_exponent = 1.0
 sleep_threshold = 0.85
 can_sleep_threshold = 0.6
