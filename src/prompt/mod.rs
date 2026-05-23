@@ -70,7 +70,6 @@ impl PromptBuilder for AwakePromptBuilder {
             }
         }
 
-
         content = self.model_patch.apply_to_system_prompt(&content);
 
         ChatMessage {

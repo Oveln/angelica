@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
+use std::path::PathBuf;
 
 use crate::permission::PermissionConfig;
 
@@ -194,18 +195,42 @@ impl Default for MemoryConfig {
     }
 }
 
-fn default_episodes_path() -> String { "data/episodes.jsonl".to_string() }
-fn default_self_path() -> String { "data/SELF.md".to_string() }
-fn default_profiles_dir() -> String { "data/profiles".to_string() }
-fn default_notebook_path() -> String { "data/notebook.md".to_string() }
-fn default_max_file_size_kb() -> usize { 32 }
-fn default_recent_threshold() -> usize { 5 }
-fn default_episode_inject_budget() -> usize { 2 }
-fn default_recall_similarity_threshold() -> f32 { 0.6 }
-fn default_recall_inject_threshold() -> f32 { 0.7 }
-fn default_recall_inject_probability() -> f32 { 0.6 }
-fn default_self_hard_limit() -> usize { 8192 }
-fn default_profile_hard_limit() -> usize { 8192 }
+fn default_episodes_path() -> String {
+    "data/episodes.jsonl".to_string()
+}
+fn default_self_path() -> String {
+    "data/SELF.md".to_string()
+}
+fn default_profiles_dir() -> String {
+    "data/profiles".to_string()
+}
+fn default_notebook_path() -> String {
+    "data/notebook.md".to_string()
+}
+fn default_max_file_size_kb() -> usize {
+    32
+}
+fn default_recent_threshold() -> usize {
+    5
+}
+fn default_episode_inject_budget() -> usize {
+    2
+}
+fn default_recall_similarity_threshold() -> f32 {
+    0.6
+}
+fn default_recall_inject_threshold() -> f32 {
+    0.7
+}
+fn default_recall_inject_probability() -> f32 {
+    0.6
+}
+fn default_self_hard_limit() -> usize {
+    8192
+}
+fn default_profile_hard_limit() -> usize {
+    8192
+}
 
 // ── Embedding ──
 
@@ -232,9 +257,15 @@ impl Default for EmbeddingConfig {
     }
 }
 
-fn default_embed_provider() -> String { "ollama".to_string() }
-fn default_embed_model() -> String { "qwen3-embedding".to_string() }
-fn default_embed_base_url() -> String { "http://localhost:11434".to_string() }
+fn default_embed_provider() -> String {
+    "ollama".to_string()
+}
+fn default_embed_model() -> String {
+    "qwen3-embedding".to_string()
+}
+fn default_embed_base_url() -> String {
+    "http://localhost:11434".to_string()
+}
 
 // ── MCP ──
 
@@ -296,6 +327,16 @@ pub struct StateConfig {
     max_snapshots: usize,
 }
 
+impl StateConfig {
+    /// Parent directory of `conversation_path`, i.e. the data root.
+    pub fn data_dir(&self) -> PathBuf {
+        PathBuf::from(&self.conversation_path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("data"))
+    }
+}
+
 impl Default for StateConfig {
     fn default() -> Self {
         Self {
@@ -342,11 +383,21 @@ impl Default for FatigueConfig {
     }
 }
 
-fn default_per_turn_base() -> f64 { 0.015 }
-fn default_per_tool_call_ratio() -> f64 { 0.333 }
-fn default_sleep_threshold() -> f64 { 1.0 }
-fn default_can_sleep_threshold() -> f64 { 0.8 }
-fn default_groggy_turns() -> u32 { 3 }
+fn default_per_turn_base() -> f64 {
+    0.015
+}
+fn default_per_tool_call_ratio() -> f64 {
+    0.333
+}
+fn default_sleep_threshold() -> f64 {
+    1.0
+}
+fn default_can_sleep_threshold() -> f64 {
+    0.8
+}
+fn default_groggy_turns() -> u32 {
+    3
+}
 
 #[cfg(test)]
 mod tests {

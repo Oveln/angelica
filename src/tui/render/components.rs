@@ -135,32 +135,54 @@ pub fn glyph_lines(
 /// Build a compact, right-aligned usage indicator for response tokens.
 /// Uses Unicode arrows for a small visual footprint:
 ///   ↓5.2k  ↑1.2k  ◎0.8k  ⚡85%
-pub fn usage_line(usage: &crate::usage::UsageMetrics, theme: &Theme, width: usize) -> Line<'static> {
+pub fn usage_line(
+    usage: &crate::usage::UsageMetrics,
+    theme: &Theme,
+    width: usize,
+) -> Line<'static> {
     let dim = Style::default().fg(theme.rail);
     let mut spans: Vec<Span<'static>> = Vec::new();
 
     // Output tokens (what the model wrote)
-    spans.push(Span::styled(format!("↓{}", format_tokens(usage.completion_tokens)), dim));
+    spans.push(Span::styled(
+        format!("↓{}", format_tokens(usage.completion_tokens)),
+        dim,
+    ));
     spans.push(Span::styled(" ", dim));
 
     // Input tokens (prompt sent to model)
-    spans.push(Span::styled(format!("↑{}", format_tokens(usage.prompt_tokens)), dim));
+    spans.push(Span::styled(
+        format!("↑{}", format_tokens(usage.prompt_tokens)),
+        dim,
+    ));
 
     if usage.reasoning_tokens > 0 {
         spans.push(Span::styled(" ", dim));
-        spans.push(Span::styled(format!("◎{}", format_tokens(usage.reasoning_tokens)), dim));
+        spans.push(Span::styled(
+            format!("◎{}", format_tokens(usage.reasoning_tokens)),
+            dim,
+        ));
     }
 
     let cache_total = usage.cache_hit_tokens + usage.cache_miss_tokens;
     if cache_total > 0 {
         spans.push(Span::styled(" ", dim));
-        spans.push(Span::styled(format!("⚡{:.0}%", usage.cache_hit_rate() * 100.0), dim));
+        spans.push(Span::styled(
+            format!("⚡{:.0}%", usage.cache_hit_rate() * 100.0),
+            dim,
+        ));
     }
 
-    let content_w: usize = spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum();
+    let content_w: usize = spans
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum();
     let rail_w = UnicodeWidthStr::width(RAIL);
     let pad = width.saturating_sub(rail_w + content_w);
-    let mut line_spans = vec![Span::styled(RAIL.to_string(), Style::default().fg(theme.rail))];
+    let mut line_spans = vec![Span::styled(
+        RAIL.to_string(),
+        Style::default().fg(theme.rail),
+    )];
     line_spans.push(Span::styled(" ".repeat(pad), dim));
     line_spans.extend(spans);
     Line::from(line_spans)

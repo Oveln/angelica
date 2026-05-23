@@ -106,11 +106,13 @@ impl Tool for WriteEpisodeTool {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'content'"))?;
 
-        let weight = args.get("emotional_weight")
+        let weight = args
+            .get("emotional_weight")
             .and_then(|v| v.as_u64())
             .map(|v| v as u8)
             .unwrap_or(3);
-        let afterglow = args.get("afterglow")
+        let afterglow = args
+            .get("afterglow")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();

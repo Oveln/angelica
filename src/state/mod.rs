@@ -10,7 +10,6 @@ pub struct AgentState {
     pub woke_at: String,
     pub sleep_started_at: Option<String>,
     pub dream: Option<String>,
-    pub last_snapshot: Option<String>,
 }
 
 impl AgentState {
@@ -20,7 +19,6 @@ impl AgentState {
             woke_at: chrono::Local::now().to_rfc3339(),
             sleep_started_at: None,
             dream: None,
-            last_snapshot: None,
         }
     }
 

@@ -112,7 +112,10 @@ impl MemoryManager {
     /// Returns the episodes that were transitioned (for consolidation).
     pub fn transition_to_past(&self) -> Vec<Episode> {
         let mut episodes = self.read_episodes();
-        let recent_count = episodes.iter().filter(|ep| ep.status == EpisodeStatus::Recent).count();
+        let recent_count = episodes
+            .iter()
+            .filter(|ep| ep.status == EpisodeStatus::Recent)
+            .count();
         let threshold = self.config.recent_threshold;
 
         if recent_count <= threshold {
@@ -266,7 +269,10 @@ mod tests {
     fn make_config(dir: &TempDir) -> MemoryConfig {
         let dir_path = dir.path();
         MemoryConfig {
-            episodes_path: dir_path.join("episodes.jsonl").to_string_lossy().to_string(),
+            episodes_path: dir_path
+                .join("episodes.jsonl")
+                .to_string_lossy()
+                .to_string(),
             self_path: dir_path.join("SELF.md").to_string_lossy().to_string(),
             profiles_dir: dir_path.join("profiles").to_string_lossy().to_string(),
             notebook_path: dir_path.join("notebook.md").to_string_lossy().to_string(),
@@ -319,8 +325,20 @@ mod tests {
         let transitioned = mgr.transition_to_past();
         assert_eq!(transitioned.len(), 2); // 5 - 3 threshold
         let episodes = mgr.read_episodes();
-        assert_eq!(episodes.iter().filter(|e| e.status == EpisodeStatus::Recent).count(), 3);
-        assert_eq!(episodes.iter().filter(|e| e.status == EpisodeStatus::Past).count(), 2);
+        assert_eq!(
+            episodes
+                .iter()
+                .filter(|e| e.status == EpisodeStatus::Recent)
+                .count(),
+            3
+        );
+        assert_eq!(
+            episodes
+                .iter()
+                .filter(|e| e.status == EpisodeStatus::Past)
+                .count(),
+            2
+        );
     }
 
     #[test]

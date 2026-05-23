@@ -1,5 +1,5 @@
-use std::io::Write;
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 
 /// Status of an episode in its lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

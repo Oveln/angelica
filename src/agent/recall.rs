@@ -1,7 +1,8 @@
 use super::Agent;
+use super::modes::RunMode;
 use crate::embedding;
 
-impl Agent {
+impl<S: RunMode> Agent<S> {
     /// After a turn completes, compute embedding from user input + assistant response
     /// and search past episodes. Store results + top score for probabilistic injection.
     pub(super) async fn recall_past_episodes(&mut self, assistant_content: Option<&str>) {
@@ -11,7 +12,12 @@ impl Agent {
         }
 
         // Get the last user message and assistant content
-        let user_msg = self.history.messages().iter().rev().find(|m| m.role == "user");
+        let user_msg = self
+            .history
+            .messages()
+            .iter()
+            .rev()
+            .find(|m| m.role == "user");
         let user_text = match user_msg.and_then(|m| m.content.as_ref()) {
             Some(t) => t.clone(),
             None => return,

@@ -3,6 +3,7 @@ use tokio::sync::mpsc;
 use super::Agent;
 use super::events::AppEvent;
 use super::group::{BatchedEdit, GroupedEdit, PendingApproval, ToolCallGroup};
+use super::modes::RunMode;
 use crate::llm::types::ToolCall;
 use crate::permission::PermissionAction;
 
@@ -11,7 +12,7 @@ pub(super) enum ProcessOutcome {
     NeedApproval,
 }
 
-impl Agent {
+impl<S: RunMode> Agent<S> {
     async fn execute_tool(&self, name: &str, args: serde_json::Value) -> String {
         if let Some(tool) = self.run_state.get_tool(name) {
             match tool.execute(args).await {

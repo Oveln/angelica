@@ -48,10 +48,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Ensure data directory is a git repo for history tracking
     {
-        let data_dir = std::path::PathBuf::from(&config.state.conversation_path)
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| std::path::PathBuf::from("data"));
+        let data_dir = config.state.data_dir();
         if let Err(e) = angelica::data_git::ensure_repo(&data_dir) {
             tracing::warn!("Failed to initialize data git repo: {}", e);
         }

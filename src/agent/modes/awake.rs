@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::agent::events::AppEvent;
 use crate::agent::modes::RunMode;
 use crate::config::Config;
 use crate::llm::types::{ChatMessage, ToolSpec};
@@ -10,6 +11,7 @@ use crate::skills::SkillRegistry;
 use crate::state::AgentState;
 use crate::tools::Tool;
 use crate::tools::ToolRegistry;
+use crate::usage::UsageScope;
 
 pub struct AwakeMode {
     tools: ToolRegistry,
@@ -17,8 +19,21 @@ pub struct AwakeMode {
     state: AgentState,
 }
 
+
 impl AwakeMode {
+    /// Create AwakeMode for normal startup. Loads persisted state if available,
+    /// otherwise starts fresh with `on_wake()`.
     pub fn new(config: &Config, memory: Arc<MemoryManager>, skills: Arc<SkillRegistry>) -> Self {
+        Self::build(config, memory, skills, None)
+    }
+
+
+    pub(crate) fn build(
+        config: &Config,
+        memory: Arc<MemoryManager>,
+        skills: Arc<SkillRegistry>,
+        wake_dream: Option<String>,
+    ) -> Self {
         let model_patch =
             crate::llm::patch::ModelPatch::new(&config.llm.model, config.llm.role_immersion);
         let prompt_builder = AwakePromptBuilder::new(model_patch);
@@ -35,18 +50,28 @@ impl AwakeMode {
             &config.state.conversation_path,
         );
 
-        let state_path = std::path::PathBuf::from(&config.state.path);
-        let state = if state_path.exists() {
-            AgentState::load(&state_path, &config.fatigue).unwrap_or_else(|e| {
-                tracing::warn!("Failed to load state: {}, creating new", e);
+        let state = match wake_dream {
+            Some(dream) => {
                 let mut s = AgentState::new(&config.fatigue);
                 s.fatigue.on_wake();
+                s.dream = Some(dream);
                 s
-            })
-        } else {
-            let mut s = AgentState::new(&config.fatigue);
-            s.fatigue.on_wake();
-            s
+            }
+            None => {
+                let state_path = std::path::PathBuf::from(&config.state.path);
+                if state_path.exists() {
+                    AgentState::load(&state_path, &config.fatigue).unwrap_or_else(|e| {
+                        tracing::warn!("Failed to load state: {}, creating new", e);
+                        let mut s = AgentState::new(&config.fatigue);
+                        s.fatigue.on_wake();
+                        s
+                    })
+                } else {
+                    let mut s = AgentState::new(&config.fatigue);
+                    s.fatigue.on_wake();
+                    s
+                }
+            }
         };
 
         Self {
@@ -71,18 +96,6 @@ impl AwakeMode {
         }
     }
 
-    pub fn take_dream(&mut self) -> Option<String> {
-        self.state.dream.take()
-    }
-
-    pub fn set_dream(&mut self, dream: String) {
-        self.state.dream = Some(dream);
-    }
-
-    pub fn set_last_snapshot(&mut self, ts: String) {
-        self.state.last_snapshot = Some(ts);
-    }
-
     pub fn fatigue_desc(&self) -> &str {
         self.state.fatigue.describe()
     }
@@ -95,32 +108,12 @@ impl AwakeMode {
         )
     }
 
-    pub fn new_with_fresh_state(
-        &self,
-        config: &Config,
-        memory: Arc<MemoryManager>,
-        skills: Arc<SkillRegistry>,
-    ) -> Self {
-        let mut mode = Self::new(config, memory, skills);
-        mode.state = AgentState::new(&config.fatigue);
-        mode.state.fatigue.on_wake();
-        mode
-    }
-
     fn builtin_rules(&self) -> Vec<(String, Vec<TargetRule>)> {
         self.tools.builtin_rules()
     }
 }
 
 impl RunMode for AwakeMode {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-
     fn tool_specs(&self) -> Vec<ToolSpec> {
         self.tools.all_specs()
     }
@@ -148,5 +141,23 @@ impl RunMode for AwakeMode {
         for _ in 0..count {
             self.state.fatigue.on_tool_call();
         }
+    }
+
+    fn fatigue_update_event(&self) -> Option<AppEvent> {
+        let (turns, tool_calls, fatigue) = self.fatigue_info();
+        Some(AppEvent::FatigueUpdate {
+            fatigue,
+            turns,
+            tool_calls,
+            desc: self.fatigue_desc().to_string(),
+        })
+    }
+
+    fn usage_scope(&self) -> UsageScope {
+        UsageScope::Awake
+    }
+
+    fn should_recall(&self) -> bool {
+        true
     }
 }

@@ -4,9 +4,9 @@ use tracing;
 
 use crate::embedding::{self, EmbeddingConfig};
 use crate::episode::Episode;
-use crate::llm::types::ChatMessage;
-use crate::llm::RequestOptions;
 use crate::llm::LlmClient;
+use crate::llm::RequestOptions;
+use crate::llm::types::ChatMessage;
 use crate::memory::MemoryManager;
 
 /// Run Phase 2a: transition excess recent episodes to past, compute embeddings for past episodes that lack them.
@@ -17,7 +17,10 @@ pub async fn phase_transition_and_embed(
     // Transition recent → past
     let transitioned = memory.transition_to_past();
     if !transitioned.is_empty() {
-        tracing::info!("Transitioned {} episodes from recent to past", transitioned.len());
+        tracing::info!(
+            "Transitioned {} episodes from recent to past",
+            transitioned.len()
+        );
     }
 
     // Compute embeddings for all past episodes that lack them
@@ -65,11 +68,7 @@ struct ConsolidationResult {
 }
 
 /// Run Phase 2b: LLM analyzes past episodes and consolidates insights into SELF.md and profile.
-pub async fn phase_consolidate(
-    memory: &MemoryManager,
-    llm: &LlmClient,
-    transitioned: &[Episode],
-) {
+pub async fn phase_consolidate(memory: &MemoryManager, llm: &LlmClient, transitioned: &[Episode]) {
     if transitioned.is_empty() {
         tracing::info!("No episodes to consolidate");
         return;
@@ -102,7 +101,8 @@ pub async fn phase_consolidate(
 {\"self_insights\": [\"洞察1\", \"洞察2\"], \"user_insights\": [\"洞察1\", \"洞察2\"]}
 
 每条洞察应该是一句简洁的陈述句。如果某类没有新的认知，返回空数组。
-只输出 JSON，不要输出其他内容。".to_string()
+只输出 JSON，不要输出其他内容。"
+                .to_string(),
         ),
         reasoning_content: None,
         tool_calls: None,
@@ -160,7 +160,11 @@ fn apply_consolidation(
     let result: ConsolidationResult = match serde_json::from_str(&json_str) {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!("Failed to parse consolidation JSON: {}\nRaw: {}", e, raw_json);
+            tracing::warn!(
+                "Failed to parse consolidation JSON: {}\nRaw: {}",
+                e,
+                raw_json
+            );
             return Err(anyhow::anyhow!("JSON parse error: {}", e));
         }
     };

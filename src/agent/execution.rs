@@ -3,10 +3,11 @@ use tokio::sync::mpsc;
 use super::Agent;
 use super::events::AppEvent;
 use super::group::group_tool_calls;
+use super::modes::RunMode;
 use super::tooling::ProcessOutcome;
 use crate::llm::LlmResponse;
 
-impl Agent {
+impl<S: RunMode> Agent<S> {
     pub async fn step(&mut self, event_tx: &mpsc::Sender<AppEvent>) -> bool {
         let max_iterations = self.max_iterations();
         let stream_to_tui = self.run_state.stream_to_tui();
@@ -48,8 +49,12 @@ impl Agent {
             } = llm_result;
 
             if self.run_state.accumulate_history() {
-                self.history
-                    .record_assistant(content.clone(), reasoning, tool_calls.clone(), usage);
+                self.history.record_assistant(
+                    content.clone(),
+                    reasoning,
+                    tool_calls.clone(),
+                    usage,
+                );
                 self.dirty = true;
             }
 
@@ -59,16 +64,20 @@ impl Agent {
                     let full_text = content.as_deref().unwrap_or("").to_string();
                     let _ = event_tx.send(AppEvent::TextDone { full_text }).await;
                     let _ = event_tx.send(AppEvent::TurnComplete).await;
-                    self.send_fatigue_update(event_tx);
+                    if let Some(evt) = self.run_state.fatigue_update_event() {
+                        let _ = event_tx.try_send(evt);
+                    }
                 }
                 // Try to recall relevant past episodes via embedding search
-                self.recall_past_episodes(content.as_deref()).await;
+                if self.run_state.should_recall() {
+                    self.recall_past_episodes(content.as_deref()).await;
+                }
                 return false;
             };
 
             self.run_state.on_tool_calls(tcs.len());
-            if stream_to_tui {
-                self.send_fatigue_update(event_tx);
+            if stream_to_tui && let Some(evt) = self.run_state.fatigue_update_event() {
+                let _ = event_tx.try_send(evt);
             }
             self.tool_queue = group_tool_calls(tcs).into();
         }

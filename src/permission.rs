@@ -107,6 +107,19 @@ impl PermissionEvaluator {
         }
     }
 
+    pub fn set_mode_rules(&mut self, builtin: Vec<(String, Vec<TargetRule>)>) {
+        self.builtin = builtin
+            .into_iter()
+            .flat_map(|(tool, rules)| {
+                rules.into_iter().map(move |r| Rule {
+                    tool: tool.clone(),
+                    target: r.target,
+                    action: r.action,
+                })
+            })
+            .collect();
+    }
+
     pub fn evaluate(&self, tool: &str, target: Option<&str>) -> PermissionAction {
         let target_str = target.unwrap_or("*");
         for ruleset in [&self.approved, &self.config, &self.builtin] {

@@ -2,12 +2,12 @@ use tokio::sync::mpsc;
 
 use super::Agent;
 use super::events::AppEvent;
-use crate::agent::modes::SleepingMode;
+use super::modes::RunMode;
 use crate::llm::types::ChatMessage;
 use crate::llm::{LlmResponse, LlmStreamEvent, RequestOptions};
-use crate::usage::{UsageRecord, UsageScope};
+use crate::usage::UsageRecord;
 
-impl Agent {
+impl<S: RunMode> Agent<S> {
     pub(super) async fn next_llm_response(
         &self,
         event_tx: &mpsc::Sender<AppEvent>,
@@ -88,11 +88,7 @@ impl Agent {
             return;
         };
 
-        let scope = if self.run_state.as_any().is::<SleepingMode>() {
-            UsageScope::Sleep
-        } else {
-            UsageScope::Awake
-        };
+        let scope = self.run_state.usage_scope();
         let record = UsageRecord::new(scope, self.iteration, context_messages, metrics);
         let config = self.config.clone();
         let disk_record = record.clone();
@@ -104,10 +100,7 @@ impl Agent {
 }
 
 fn append_usage_record(config: &crate::config::Config, record: &UsageRecord) {
-    let data_dir = std::path::PathBuf::from(&config.state.conversation_path)
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| std::path::PathBuf::from("data"));
+    let data_dir = config.state.data_dir();
     let path = data_dir.join("usage.jsonl");
 
     if let Some(parent) = path.parent()
