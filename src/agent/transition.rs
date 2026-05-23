@@ -66,7 +66,7 @@ impl Agent<SleepingMode> {
         snapshot_ts: String,
     ) -> Agent<AwakeMode> {
         use crate::agent::events::AppEvent;
-        
+
         use crate::llm::LlmClient;
         use crate::sleep::consolidation;
 
@@ -80,7 +80,10 @@ impl Agent<SleepingMode> {
                 break;
             }
             let continued = self.step(event_tx).await;
-            if !continued && !self.is_finished() {
+            if self.is_finished() {
+                break;
+            }
+            if !continued {
                 tracing::warn!("Sleep step ended without finishing; breaking loop");
                 break;
             }
