@@ -56,11 +56,13 @@ impl Agent {
             let Some(tcs) = tool_calls else {
                 self.run_state.on_turn_complete(content.as_deref());
                 if stream_to_tui {
-                    let full_text = content.unwrap_or_default();
+                    let full_text = content.as_deref().unwrap_or("").to_string();
                     let _ = event_tx.send(AppEvent::TextDone { full_text }).await;
                     let _ = event_tx.send(AppEvent::TurnComplete).await;
                     self.send_fatigue_update(event_tx);
                 }
+                // Try to recall relevant past episodes via embedding search
+                self.recall_past_episodes(content.as_deref()).await;
                 return false;
             };
 

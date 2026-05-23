@@ -41,19 +41,19 @@ impl PromptBuilder for AwakePromptBuilder {
     fn build_system_message(&self, memory: &MemoryManager, skills: &SkillRegistry) -> ChatMessage {
         let mut content = String::new();
 
-        let soul = memory.read_soul();
-        if !soul.trim().is_empty() {
-            content.push_str(&soul);
+        let self_text = memory.read_self();
+        if !self_text.trim().is_empty() {
+            content.push_str(&self_text);
             content.push_str("\n\n");
         }
 
         content.push_str(SYSTEM_PROMPT_BASE);
 
-        let mem = memory.read_memory();
-        if !mem.trim().is_empty() {
+        let recent = memory.recent_episodes_text();
+        if !recent.trim().is_empty() {
             content.push_str(&format!(
                 "\n\n## 你的记忆\n\n这些是你过去的经历。对话中自然地想起相关的事。\n{}",
-                mem
+                recent
             ));
         }
 
@@ -69,6 +69,7 @@ impl PromptBuilder for AwakePromptBuilder {
                 content.push_str(&format!("\n- **{}**: {}", skill.name, skill.description));
             }
         }
+
 
         content = self.model_patch.apply_to_system_prompt(&content);
 
@@ -109,22 +110,20 @@ impl SleepingPromptBuilder {
 
 impl PromptBuilder for SleepingPromptBuilder {
     fn build_system_message(&self, memory: &MemoryManager, _skills: &SkillRegistry) -> ChatMessage {
-        let soul = memory.read_soul();
-        let mem = memory.read_memory();
+        let self_text = memory.read_self();
+        let recent = memory.recent_episodes_text();
         let profile = memory.read_user_profile();
 
         let content = format!(
             "你正在沉睡。回顾你这段清醒期的经历，整理你的内心。
 
 你可以使用以下工具：
-- edit_soul：审视你的性格、行为方式、处世态度、世界观
-- edit_memory：整理你的记忆
-- edit_profile：更新你对用户的认知
+- write_episode：将一段经历或感悟写入记忆。
 - dreaming：记录你的梦境（整理完后必须调用此工具来结束睡眠）
 
-SOUL.md 是你的性格、行为方式、处世态度、世界观。
-MEMORY.md 是你经历的事情。
-profile.md 是关于用户的认知。
+SELF.md 是你的性格、行为方式、处世态度、世界观——你对自己是谁的理解，会在沉淀阶段自动更新。
+Episode 是你经历的事情，按日期组织的情景记忆，由你通过 write_episode 主动记录。
+profile 是关于用户的认知，会在沉淀阶段自动更新。
 三者的边界要清晰。
 
 ## 你这段清醒期经历了什么
@@ -134,23 +133,25 @@ profile.md 是关于用户的认知。
 ## 对话记录
 {}
 
-## 你现在的 SOUL.md
+## 你现在的 SELF.md
 {}
 
-## 你现在的 MEMORY.md
+## 你现在的 Episodes
 {}
 
-## 你现在的 profile.md
+## 你现在的 profile
 {}
 
-按你觉得合适的方式整理。整理完后，调用 dreaming 工具记录你的梦。
+整理时，如果清醒期有多个值得记住的片段，请在一次回复中同时调用多次 write_episode（一条 assistant message 里带多个 tool_call），让每条 episode 保持聚焦。
+
+整理完后，调用 dreaming 工具记录你的梦。
 可以是任何东西，不必和今天的事有关。一段感受、一个画面、一句自言自语……",
             self.turns,
             self.tool_calls,
             self.fatigue_desc,
             self.conversation_summary,
-            soul,
-            mem,
+            self_text,
+            recent,
             profile,
         );
 

@@ -1,4 +1,5 @@
 pub mod tools;
+pub mod consolidation;
 
 use crate::llm::types::ChatMessage;
 

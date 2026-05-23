@@ -43,8 +43,10 @@ dependencies = [
  "crossterm",
  "futures",
  "genai",
+ "rand 0.9.4",
  "ratatui",
  "regex",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -56,6 +58,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-width",
+ "uuid",
 ]
 
 [[package]]

@@ -11,6 +11,8 @@ pub struct Config {
     #[serde(default)]
     pub memory: MemoryConfig,
     #[serde(default)]
+    pub embedding: EmbeddingConfig,
+    #[serde(default)]
     pub mcp: McpConfig,
     #[serde(default)]
     pub skills: SkillsConfig,
@@ -34,9 +36,9 @@ impl Config {
     }
 
     pub fn resolve_paths(&mut self, base: &Path) {
-        self.memory.memory_path = Self::absolute_or(base, &self.memory.memory_path);
-        self.memory.profile_path = Self::absolute_or(base, &self.memory.profile_path);
-        self.memory.soul_path = Self::absolute_or(base, &self.memory.soul_path);
+        self.memory.episodes_path = Self::absolute_or(base, &self.memory.episodes_path);
+        self.memory.self_path = Self::absolute_or(base, &self.memory.self_path);
+        self.memory.profiles_dir = Self::absolute_or(base, &self.memory.profiles_dir);
         self.memory.notebook_path = Self::absolute_or(base, &self.memory.notebook_path);
         self.skills.directory = Self::absolute_or(base, &self.skills.directory);
         self.permission.approved_path = Self::absolute_or(base, &self.permission.approved_path);
@@ -61,6 +63,8 @@ impl std::str::FromStr for Config {
         Self::parse_toml(s)
     }
 }
+
+// ── LLM ──
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct LlmConfig {
@@ -140,85 +144,99 @@ fn default_true() -> bool {
 fn default_max_iterations() -> u32 {
     10
 }
-#[derive(Debug, Clone)]
+
+// ── Memory ──
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct MemoryConfig {
-    pub memory_path: String,
-    pub profile_path: String,
-    pub soul_path: String,
+    #[serde(default = "default_episodes_path")]
+    pub episodes_path: String,
+    #[serde(default = "default_self_path")]
+    pub self_path: String,
+    #[serde(default = "default_profiles_dir")]
+    pub profiles_dir: String,
+    #[serde(default = "default_notebook_path")]
     pub notebook_path: String,
+    #[serde(default = "default_max_file_size_kb")]
     pub max_file_size_kb: usize,
+    #[serde(default = "default_recent_threshold")]
+    pub recent_threshold: usize,
+    #[serde(default = "default_episode_inject_budget")]
+    pub episode_inject_budget: usize,
+    #[serde(default = "default_recall_similarity_threshold")]
+    pub recall_similarity_threshold: f32,
+    #[serde(default = "default_recall_inject_threshold")]
+    pub recall_inject_threshold: f32,
+    #[serde(default = "default_recall_inject_probability")]
+    pub recall_inject_probability: f32,
+    #[serde(default = "default_self_hard_limit")]
+    pub self_hard_limit: usize,
+    #[serde(default = "default_profile_hard_limit")]
+    pub profile_hard_limit: usize,
 }
 
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            memory_path: default_memory_path(),
-            profile_path: default_profile_path(),
-            soul_path: default_soul_path(),
+            episodes_path: default_episodes_path(),
+            self_path: default_self_path(),
+            profiles_dir: default_profiles_dir(),
             notebook_path: default_notebook_path(),
             max_file_size_kb: default_max_file_size_kb(),
+            recent_threshold: default_recent_threshold(),
+            episode_inject_budget: default_episode_inject_budget(),
+            recall_similarity_threshold: default_recall_similarity_threshold(),
+            recall_inject_threshold: default_recall_inject_threshold(),
+            recall_inject_probability: default_recall_inject_probability(),
+            self_hard_limit: default_self_hard_limit(),
+            profile_hard_limit: default_profile_hard_limit(),
         }
     }
 }
 
-fn default_memory_path() -> String {
-    "data/MEMORY.md".to_string()
-}
-fn default_profile_path() -> String {
-    "data/profile.md".to_string()
-}
-fn default_soul_path() -> String {
-    "data/SOUL.md".to_string()
-}
-fn default_notebook_path() -> String {
-    "data/notebook.md".to_string()
-}
-fn default_max_file_size_kb() -> usize {
-    32
+fn default_episodes_path() -> String { "data/episodes.jsonl".to_string() }
+fn default_self_path() -> String { "data/SELF.md".to_string() }
+fn default_profiles_dir() -> String { "data/profiles".to_string() }
+fn default_notebook_path() -> String { "data/notebook.md".to_string() }
+fn default_max_file_size_kb() -> usize { 32 }
+fn default_recent_threshold() -> usize { 5 }
+fn default_episode_inject_budget() -> usize { 2 }
+fn default_recall_similarity_threshold() -> f32 { 0.6 }
+fn default_recall_inject_threshold() -> f32 { 0.7 }
+fn default_recall_inject_probability() -> f32 { 0.6 }
+fn default_self_hard_limit() -> usize { 8192 }
+fn default_profile_hard_limit() -> usize { 8192 }
+
+// ── Embedding ──
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EmbeddingConfig {
+    #[serde(default = "default_embed_provider")]
+    pub provider: String,
+    #[serde(default = "default_embed_model")]
+    pub model: String,
+    #[serde(default = "default_embed_base_url")]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key_env: String,
 }
 
-// Custom Deserialize to support old config keys (agent_memory_path, user_profile_path)
-impl<'de> serde::Deserialize<'de> for MemoryConfig {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        struct RawMemory {
-            #[serde(default = "default_memory_path")]
-            memory_path: String,
-            #[serde(default = "default_profile_path")]
-            profile_path: String,
-            #[serde(default = "default_soul_path")]
-            soul_path: String,
-            #[serde(default = "default_notebook_path")]
-            notebook_path: String,
-            #[serde(default = "default_max_file_size_kb")]
-            max_file_size_kb: usize,
-            #[serde(default = "default_memory_path")]
-            agent_memory_path: String,
-            #[serde(default = "default_profile_path")]
-            user_profile_path: String,
+impl Default for EmbeddingConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_embed_provider(),
+            model: default_embed_model(),
+            base_url: default_embed_base_url(),
+            api_key_env: String::new(),
         }
-        let raw = RawMemory::deserialize(d)?;
-        Ok(MemoryConfig {
-            memory_path: if raw.memory_path == default_memory_path()
-                && raw.agent_memory_path != default_memory_path()
-            {
-                raw.agent_memory_path
-            } else {
-                raw.memory_path
-            },
-            profile_path: if raw.profile_path == default_profile_path()
-                && raw.user_profile_path != default_profile_path()
-            {
-                raw.user_profile_path
-            } else {
-                raw.profile_path
-            },
-            soul_path: raw.soul_path,
-            notebook_path: raw.notebook_path,
-            max_file_size_kb: raw.max_file_size_kb,
-        })
     }
 }
+
+fn default_embed_provider() -> String { "ollama".to_string() }
+fn default_embed_model() -> String { "qwen3-embedding".to_string() }
+fn default_embed_base_url() -> String { "http://localhost:11434".to_string() }
+
+// ── MCP ──
 
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct McpConfig {
@@ -242,6 +260,8 @@ fn default_stdio() -> String {
     "stdio".to_string()
 }
 
+// ── Skills ──
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct SkillsConfig {
     #[serde(default = "default_skills_dir")]
@@ -260,13 +280,14 @@ fn default_skills_dir() -> String {
     "skills".to_string()
 }
 
+// ── State ──
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct StateConfig {
     #[serde(default = "default_state_path")]
     pub path: String,
     #[serde(default = "default_conversation_path")]
     pub conversation_path: String,
-    // Legacy fields kept for backward compat with old config files
     #[serde(default)]
     #[allow(dead_code)]
     archive_dir: String,
@@ -292,6 +313,9 @@ fn default_state_path() -> String {
 fn default_conversation_path() -> String {
     "data/conversation.jsonl".to_string()
 }
+
+// ── Fatigue ──
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct FatigueConfig {
     #[serde(default = "default_per_turn_base")]
@@ -318,21 +342,11 @@ impl Default for FatigueConfig {
     }
 }
 
-fn default_per_turn_base() -> f64 {
-    0.015
-}
-fn default_per_tool_call_ratio() -> f64 {
-    0.333
-}
-fn default_sleep_threshold() -> f64 {
-    1.0
-}
-fn default_can_sleep_threshold() -> f64 {
-    0.8
-}
-fn default_groggy_turns() -> u32 {
-    3
-}
+fn default_per_turn_base() -> f64 { 0.015 }
+fn default_per_tool_call_ratio() -> f64 { 0.333 }
+fn default_sleep_threshold() -> f64 { 1.0 }
+fn default_can_sleep_threshold() -> f64 { 0.8 }
+fn default_groggy_turns() -> u32 { 3 }
 
 #[cfg(test)]
 mod tests {
@@ -343,6 +357,8 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.llm.model, "deepseek-v4-flash");
         assert!(config.llm.thinking);
+        assert_eq!(config.embedding.provider, "ollama");
+        assert_eq!(config.embedding.model, "qwen3-embedding");
     }
 
     #[test]
@@ -355,24 +371,15 @@ max_tokens = 8192
 thinking = false
 
 [memory]
-memory_path = "data/mem.md"
-max_file_size_kb = 64
+recent_threshold = 3
+
+[embedding]
+provider = "ollama"
+model = "qwen3-embedding"
 "#;
         let config = Config::parse_toml(toml).unwrap();
         assert_eq!(config.llm.model, "deepseek-v4-pro");
         assert!(!config.llm.thinking);
-        assert_eq!(config.memory.max_file_size_kb, 64);
-    }
-
-    #[test]
-    fn parse_old_memory_keys() {
-        let toml = r#"
-[memory]
-agent_memory_path = "data/old_memory.md"
-user_profile_path = "data/old_profile.md"
-"#;
-        let config = Config::parse_toml(toml).unwrap();
-        assert_eq!(config.memory.memory_path, "data/old_memory.md");
-        assert_eq!(config.memory.profile_path, "data/old_profile.md");
+        assert_eq!(config.memory.recent_threshold, 3);
     }
 }

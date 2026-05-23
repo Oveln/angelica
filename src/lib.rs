@@ -1,5 +1,7 @@
 pub mod agent;
 pub mod config;
+pub mod episode;
+pub mod embedding;
 pub mod data_git;
 pub mod fatigue;
 pub mod llm;

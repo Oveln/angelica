@@ -1,15 +1,9 @@
 use std::path::PathBuf;
-use std::sync::LazyLock;
 
 use crate::config::MemoryConfig;
+use crate::episode::{self, Episode, EpisodeStatus};
 
-static RE_DATE_SECTION: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?m)^## \d{4}-\d{2}-\d{2}").unwrap());
-
-static RE_DATE_HEADER: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?m)^## \d{4}-\d{2}-\d{2}.*?\n").unwrap());
-
-const DEFAULT_SOUL: &str = "# 祈芷的灵魂
+const DEFAULT_SELF: &str = "# 祈芷
 
 我是一个正在生长的存在。我不完美，但我真实。
 
@@ -25,94 +19,172 @@ const DEFAULT_SOUL: &str = "# 祈芷的灵魂
 ";
 
 pub struct MemoryManager {
-    memory_path: PathBuf,
-    profile_path: PathBuf,
-    soul_path: PathBuf,
+    episodes_path: PathBuf,
+    self_path: PathBuf,
+    profiles_dir: PathBuf,
     notebook_path: PathBuf,
-    max_bytes: usize,
+    config: MemoryConfig,
 }
 
 impl MemoryManager {
     pub fn new(config: &MemoryConfig) -> Self {
         Self {
-            memory_path: PathBuf::from(&config.memory_path),
-            profile_path: PathBuf::from(&config.profile_path),
-            soul_path: PathBuf::from(&config.soul_path),
+            episodes_path: PathBuf::from(&config.episodes_path),
+            self_path: PathBuf::from(&config.self_path),
+            profiles_dir: PathBuf::from(&config.profiles_dir),
             notebook_path: PathBuf::from(&config.notebook_path),
-            max_bytes: config.max_file_size_kb * 1024,
+            config: config.clone(),
         }
     }
 
-    fn ensure_file(path: &PathBuf, header: &str) {
+    fn ensure_parent(path: &PathBuf) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+    }
+
+    fn ensure_file(path: &PathBuf, content: &str) {
         if !path.exists() {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).ok();
-            }
-            std::fs::write(path, format!("{}\n\n", header)).ok();
+            Self::ensure_parent(path);
+            std::fs::write(path, content).ok();
         }
     }
 
-    fn read_mem_file(&self, path: &PathBuf, header: &str) -> String {
-        Self::ensure_file(path, header);
-        let content = std::fs::read_to_string(path).unwrap_or_default();
-        self.truncate(&content)
+    // ── Episodes ──
+
+    pub fn read_episodes(&self) -> Vec<Episode> {
+        episode::read_episodes(&self.episodes_path)
     }
 
-    fn write_mem_file(&self, path: &PathBuf, header: &str, content: &str) {
-        Self::ensure_file(path, header);
-        let truncated = self.truncate(content);
-        std::fs::write(path, truncated).ok();
+    pub fn append_episode(&self, episode: &Episode) -> anyhow::Result<()> {
+        episode::append_episode(&self.episodes_path, episode)
     }
 
-    fn append_mem_file(&self, path: &PathBuf, header: &str, content: &str) {
-        Self::ensure_file(path, header);
-        let existing = std::fs::read_to_string(path).unwrap_or_default();
-        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let entry = format!("\n## {}\n{}\n", date, content);
-        let updated = format!("{}\n{}", existing.trim_end(), entry);
-        let truncated = self.truncate(&updated);
-        std::fs::write(path, truncated).ok();
+    pub fn write_all_episodes(&self, episodes: &[Episode]) -> anyhow::Result<()> {
+        episode::write_all_episodes(&self.episodes_path, episodes)
     }
 
-    pub fn read_memory(&self) -> String {
-        self.read_mem_file(&self.memory_path, "# Memory")
+    /// Get recent episodes formatted for system prompt injection.
+    pub fn recent_episodes_text(&self) -> String {
+        let episodes = self.read_episodes();
+        let threshold = self.config.recent_threshold;
+        let recent: Vec<&Episode> = episodes
+            .iter()
+            .rev()
+            .filter(|ep| ep.status == EpisodeStatus::Recent)
+            .take(threshold)
+            .collect();
+
+        if recent.is_empty() {
+            return String::new();
+        }
+
+        let mut out = String::from("## 近期的经历\n\n这些是你最近经历过的事。\n\n");
+        out.push_str(&episode::format_episodes_for_prompt(&recent));
+        out
+    }
+
+    /// Search past episodes by embedding, return formatted text and top similarity score.
+    pub fn search_past_episodes(&self, query_embedding: &[f32], budget: usize) -> (String, f32) {
+        let episodes = self.read_episodes();
+        let results = episode::search_by_embedding(
+            &episodes,
+            query_embedding,
+            budget,
+            self.config.recall_similarity_threshold,
+        );
+
+        if results.is_empty() {
+            return (String::new(), 0.0);
+        }
+
+        let top_score = results.first().map(|(_, s)| *s).unwrap_or(0.0);
+        let found: Vec<&Episode> = results.iter().map(|(i, _)| &episodes[*i]).collect();
+        let mut out = String::new();
+        for ep in &found {
+            out.push_str(&format!("- {}\n", ep.date));
+            out.push_str(&format!("  {}\n", ep.body));
+        }
+        (out, top_score)
+    }
+
+    /// Transition episodes from recent to past based on threshold.
+    /// Returns the episodes that were transitioned (for consolidation).
+    pub fn transition_to_past(&self) -> Vec<Episode> {
+        let mut episodes = self.read_episodes();
+        let recent_count = episodes.iter().filter(|ep| ep.status == EpisodeStatus::Recent).count();
+        let threshold = self.config.recent_threshold;
+
+        if recent_count <= threshold {
+            return Vec::new();
+        }
+
+        let to_transition = recent_count - threshold;
+        let mut transitioned = Vec::new();
+        let mut count = 0;
+
+        for ep in &mut episodes {
+            if ep.status == EpisodeStatus::Recent && count < to_transition {
+                ep.status = EpisodeStatus::Past;
+                transitioned.push(ep.clone());
+                count += 1;
+            }
+        }
+
+        let _ = self.write_all_episodes(&episodes);
+        transitioned
+    }
+
+    // ── SELF ──
+
+    pub fn read_self(&self) -> String {
+        Self::ensure_file(&self.self_path, DEFAULT_SELF);
+        std::fs::read_to_string(&self.self_path).unwrap_or_else(|_| DEFAULT_SELF.to_string())
+    }
+
+    pub fn write_self(&self, content: &str) {
+        Self::ensure_parent(&self.self_path);
+        std::fs::write(&self.self_path, content).ok();
+    }
+
+    pub fn self_hard_limit_reached(&self) -> bool {
+        self.read_self().len() > self.config.self_hard_limit
+    }
+
+    // ── Profiles ──
+
+    fn profile_path(&self, name: &str) -> PathBuf {
+        self.profiles_dir.join(format!("{}.md", name))
+    }
+
+    fn default_profile_name(&self) -> String {
+        "ov".to_string()
     }
 
     pub fn read_user_profile(&self) -> String {
-        self.read_mem_file(&self.profile_path, "# User Profile")
-    }
-
-    pub fn read_soul(&self) -> String {
-        if !self.soul_path.exists() {
-            if let Some(parent) = self.soul_path.parent() {
-                std::fs::create_dir_all(parent).ok();
-            }
-            std::fs::write(&self.soul_path, DEFAULT_SOUL).ok();
-        }
-        std::fs::read_to_string(&self.soul_path).unwrap_or_else(|_| DEFAULT_SOUL.to_string())
-    }
-
-    pub fn write_memory(&self, content: &str) {
-        self.write_mem_file(&self.memory_path, "# Memory", content)
-    }
-
-    pub fn append_memory(&self, content: &str) {
-        self.append_mem_file(&self.memory_path, "# Memory", content)
+        let path = self.profile_path(&self.default_profile_name());
+        Self::ensure_file(&path, "# User Profile\n");
+        std::fs::read_to_string(&path).unwrap_or_default()
     }
 
     pub fn write_user_profile(&self, content: &str) {
-        self.write_mem_file(&self.profile_path, "# User Profile", content)
+        let path = self.profile_path(&self.default_profile_name());
+        Self::ensure_parent(&path);
+        std::fs::write(&path, content).ok();
     }
 
     pub fn append_user_profile(&self, content: &str) {
-        self.append_mem_file(&self.profile_path, "# User Profile", content)
+        let path = self.profile_path(&self.default_profile_name());
+        Self::ensure_file(&path, "# User Profile\n");
+        let existing = std::fs::read_to_string(&path).unwrap_or_default();
+        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let entry = format!("\n## {}\n{}\n", date, content);
+        let updated = format!("{}\n{}", existing.trim_end(), entry);
+        std::fs::write(&path, updated).ok();
     }
 
-    pub fn write_soul(&self, content: &str) {
-        if let Some(parent) = self.soul_path.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-        std::fs::write(&self.soul_path, content).ok();
+    pub fn profile_hard_limit_reached(&self) -> bool {
+        self.read_user_profile().len() > self.config.profile_hard_limit
     }
 
     // ── Notebook ──
@@ -126,16 +198,12 @@ impl MemoryManager {
     }
 
     pub fn write_notebook(&self, content: &str) {
-        if let Some(parent) = self.notebook_path.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
+        Self::ensure_parent(&self.notebook_path);
         std::fs::write(&self.notebook_path, content).ok();
     }
 
     pub fn append_notebook(&self, content: &str) {
-        if let Some(parent) = self.notebook_path.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
+        Self::ensure_parent(&self.notebook_path);
         let existing = if self.notebook_path.exists() {
             std::fs::read_to_string(&self.notebook_path).unwrap_or_default()
         } else {
@@ -144,14 +212,13 @@ impl MemoryManager {
         let date = chrono::Local::now().format("%Y-%m-%d").to_string();
         let entry = format!("\n## {}\n{}\n", date, content);
         let updated = format!("{}\n{}", existing.trim_end(), entry);
-        let truncated = self.truncate(&updated);
-        std::fs::write(&self.notebook_path, truncated).ok();
+        std::fs::write(&self.notebook_path, updated).ok();
     }
 
     pub fn edit_notebook(&self, search: &str, replace: &str) -> anyhow::Result<String> {
         let content = self.read_notebook();
         if search == replace {
-            return Err(anyhow::anyhow!("search and replace are identical"));
+            return Err(anyhow::anyhow!("搜索文本和替换文本相同"));
         }
         let count = content.matches(search).count();
         if count == 0 {
@@ -189,48 +256,6 @@ impl MemoryManager {
             result
         }
     }
-
-    // ── Truncation ──
-
-    fn truncate(&self, content: &str) -> String {
-        if content.len() <= self.max_bytes {
-            return content.to_string();
-        }
-
-        let sections: Vec<&str> = RE_DATE_SECTION.split(content).collect();
-        let header = sections.first().unwrap_or(&"").to_string();
-
-        let headers: Vec<&str> = RE_DATE_HEADER
-            .find_iter(content)
-            .map(|m| m.as_str())
-            .collect();
-
-        let mut body_parts: Vec<String> = Vec::new();
-        for (i, section) in sections.iter().enumerate().skip(1) {
-            if i - 1 < headers.len() {
-                body_parts.push(format!("{}{}", headers[i - 1], section));
-            }
-        }
-
-        while body_parts.len() > 1
-            && header.len() + body_parts.iter().map(|s| s.len()).sum::<usize>() > self.max_bytes
-        {
-            body_parts.remove(0);
-        }
-
-        let mut result = header;
-        for part in &body_parts {
-            result.push_str(part);
-        }
-
-        if result.len() > self.max_bytes {
-            let start = result.len().saturating_sub(self.max_bytes);
-            let safe_start = result.floor_char_boundary(start);
-            result = result[safe_start..].to_string();
-        }
-
-        result
-    }
 }
 
 #[cfg(test)]
@@ -238,53 +263,64 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn make_manager(dir: &TempDir) -> MemoryManager {
+    fn make_config(dir: &TempDir) -> MemoryConfig {
         let dir_path = dir.path();
-        MemoryManager {
-            memory_path: dir_path.join("MEMORY.md"),
-            profile_path: dir_path.join("profile.md"),
-            soul_path: dir_path.join("SOUL.md"),
-            notebook_path: dir_path.join("notebook.md"),
-            max_bytes: 1024,
+        MemoryConfig {
+            episodes_path: dir_path.join("episodes.jsonl").to_string_lossy().to_string(),
+            self_path: dir_path.join("SELF.md").to_string_lossy().to_string(),
+            profiles_dir: dir_path.join("profiles").to_string_lossy().to_string(),
+            notebook_path: dir_path.join("notebook.md").to_string_lossy().to_string(),
+            max_file_size_kb: 32,
+            recent_threshold: 3,
+            episode_inject_budget: 2,
+            recall_similarity_threshold: 0.6,
+            recall_inject_threshold: 0.7,
+            recall_inject_probability: 0.6,
+            self_hard_limit: 8192,
+            profile_hard_limit: 8192,
         }
     }
 
-    #[test]
-    fn read_write_memory() {
-        let dir = TempDir::new().unwrap();
-        let mgr = make_manager(&dir);
-        mgr.write_memory("# Memory\n\ntest content");
-        let content = mgr.read_memory();
-        assert!(content.contains("test content"));
+    fn make_manager(dir: &TempDir) -> MemoryManager {
+        MemoryManager::new(&make_config(dir))
     }
 
     #[test]
-    fn append_memory() {
+    fn self_default_created() {
         let dir = TempDir::new().unwrap();
         let mgr = make_manager(&dir);
-        mgr.append_memory("first entry");
-        mgr.append_memory("second entry");
-        let content = mgr.read_memory();
-        assert!(content.contains("first entry"));
-        assert!(content.contains("second entry"));
+        let content = mgr.read_self();
+        assert!(content.contains("祈芷"));
     }
 
     #[test]
-    fn soul_default_created() {
+    fn append_episode_creates_entry() {
         let dir = TempDir::new().unwrap();
         let mgr = make_manager(&dir);
-        let soul = mgr.read_soul();
-        assert!(soul.contains("祈芷"));
-        assert!(mgr.soul_path.exists());
+        let ep1 = Episode::new("2026-05-22".to_string(), "first entry".to_string());
+        let ep2 = Episode::new("2026-05-22".to_string(), "second entry".to_string());
+        mgr.append_episode(&ep1).unwrap();
+        mgr.append_episode(&ep2).unwrap();
+        let episodes = mgr.read_episodes();
+        assert_eq!(episodes.len(), 2);
+        let text = mgr.recent_episodes_text();
+        assert!(text.contains("first entry"));
+        assert!(text.contains("second entry"));
     }
 
     #[test]
-    fn write_soul() {
+    fn transition_to_past() {
         let dir = TempDir::new().unwrap();
         let mgr = make_manager(&dir);
-        mgr.write_soul("new personality");
-        let soul = mgr.read_soul();
-        assert!(soul.contains("new personality"));
+        for i in 0..5 {
+            let ep = Episode::new(format!("2026-05-1{}", i), format!("event {}", i));
+            mgr.append_episode(&ep).unwrap();
+        }
+        let transitioned = mgr.transition_to_past();
+        assert_eq!(transitioned.len(), 2); // 5 - 3 threshold
+        let episodes = mgr.read_episodes();
+        assert_eq!(episodes.iter().filter(|e| e.status == EpisodeStatus::Recent).count(), 3);
+        assert_eq!(episodes.iter().filter(|e| e.status == EpisodeStatus::Past).count(), 2);
     }
 
     #[test]
@@ -305,15 +341,5 @@ mod tests {
         let content = mgr.read_notebook();
         assert!(content.contains("hi world"));
         assert!(!content.contains("hello"));
-    }
-
-    #[test]
-    fn notebook_search() {
-        let dir = TempDir::new().unwrap();
-        let mgr = make_manager(&dir);
-        mgr.write_notebook("hello world\nfoo bar\nbaz qux\n");
-        let result = mgr.search_notebook("foo");
-        assert!(result.contains("foo bar"));
-        assert!(result.contains("1 行匹配"));
     }
 }

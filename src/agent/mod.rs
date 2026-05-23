@@ -48,6 +48,7 @@ pub mod modes;
 pub mod run;
 mod tooling;
 mod turn;
+mod recall;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -78,6 +79,8 @@ pub(crate) struct Agent {
     tool_queue: VecDeque<ToolCallGroup>,
     iteration: usize,
     dirty: bool,
+    recall_text: String,
+    recall_top_score: f32,
     permissions: PermissionEvaluator,
     approved_path: PathBuf,
 }
@@ -100,7 +103,7 @@ impl Agent {
             config.permission.tools.clone(),
         );
 
-        Self {
+        let mut agent = Self {
             config,
             llm,
             memory,
@@ -112,9 +115,21 @@ impl Agent {
             tool_queue: VecDeque::new(),
             iteration: 0,
             dirty: false,
+            recall_text: String::new(),
+            recall_top_score: 0.0,
             permissions,
             approved_path,
+        };
+
+        // System prompt pushed once at construction — covers awake fresh start
+        // and sleep mode uniformly. On resume the history is non-empty so this
+        // is a no-op.
+        if agent.history.messages().is_empty() {
+            let system_msg = agent.run_state.build_system_message(&agent.memory, &agent.skills);
+            agent.history.push(system_msg);
         }
+
+        agent
     }
 
     pub fn awake(config: Config) -> Self {
@@ -175,11 +190,6 @@ impl Agent {
     }
 
     pub fn push_user_message(&mut self, content: &str) {
-        if self.history.messages().is_empty() {
-            let system_msg = self.build_system_message();
-            self.history.push(system_msg);
-        }
-
         // Bake per-turn context (time, fatigue, session depth) into the user
         // message so the history prefix (system prompt) stays stable for
         // DeepSeek prefix cache across turns.
@@ -231,7 +241,18 @@ impl Agent {
             parts.push("你刚从梦中醒来，梦中的感受还隐约残留。".to_string());
         }
 
-        format!("{}\n\n{}", parts.join("\n"), user_input)
+        // Recalled past episodes — inject probabilistically when similarity is high
+        if !self.recall_text.is_empty()
+            && self.recall_top_score >= self.config.memory.recall_inject_threshold
+        {
+            let roll = rand::random::<f32>();
+            if roll < self.config.memory.recall_inject_probability {
+                parts.push(format!("唤起的记忆：
+{}", self.recall_text));
+            }
+        }
+
+        format!("[以下为系统上下文，不是用户的输入]\n{}\n\n[以下是用户的输入]\n{}", parts.join("\n"), user_input)
     }
 
     pub async fn save_if_dirty(&mut self) {

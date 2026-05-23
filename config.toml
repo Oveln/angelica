@@ -6,21 +6,24 @@ temperature = 0.7
 thinking = true
 reasoning_effort = "high"
 max_iterations = 15
-# role_immersion = true    # true = 强制开启, false = 强制关闭, 不设置 = 自动检测
-
-# Named profiles — unset fields inherit from [llm] above.
-# [llm.profiles.fast]
-# model = "deepseek-v4-flash"
-# temperature = 0.3
-# thinking = false
-# max_tokens = 2048
 
 [memory]
-memory_path = "data/MEMORY.md"
-profile_path = "data/profile.md"
-soul_path = "data/SOUL.md"
+episodes_path = "data/episodes.jsonl"
+self_path = "data/SELF.md"
+profiles_dir = "data/profiles"
 notebook_path = "data/notebook.md"
-max_file_size_kb = 32
+recent_threshold = 5
+episode_inject_budget = 2
+recall_similarity_threshold = 0.6
+recall_inject_threshold = 0.7
+recall_inject_probability = 0.6
+self_hard_limit = 8192
+profile_hard_limit = 8192
+
+[embedding]
+provider = "ollama"
+model = "qwen3-embedding"
+base_url = "http://localhost:11434"
 
 [skills]
 directory = "skills"
@@ -39,9 +42,3 @@ per_tool_call_ratio = 0.333
 sleep_threshold = 1.0
 can_sleep_threshold = 0.8
 groggy_turns = 3
-
-# Example MCP server configs:
-# [mcp.servers.filesystem]
-# transport = "stdio"
-# command = "npx"
-# args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]

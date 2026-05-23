@@ -4,6 +4,9 @@ use super::Agent;
 use super::events::{AppEvent, UserAction};
 use crate::agent::modes::SleepingMode;
 use crate::config::Config;
+use crate::embedding::EmbeddingConfig;
+use crate::llm::LlmClient;
+use crate::sleep::consolidation;
 
 pub async fn run(
     config: Config,
@@ -128,7 +131,7 @@ async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent
         }
     }
 
-    // Phase 3: create sleep agent and run full ReAct loop
+    // Phase 1 (回忆): create sleep agent and run full ReAct loop
     let sleeping = SleepingMode::new(
         memory.clone(),
         conversation_text,
@@ -158,6 +161,16 @@ async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent
         }
     }
 
+    // Phase 2 (沉淀): transition recent→past, compute embeddings, consolidate
+    let embed_config = EmbeddingConfig::from_config(&config.embedding);
+    let transitioned = consolidation::phase_transition_and_embed(&memory, &embed_config).await;
+
+    let llm = LlmClient::new(&config.llm);
+    consolidation::phase_consolidate(&memory, &llm, &transitioned).await;
+
+    // Phase 3 (遗忘): compress SELF.md / profile if over hard limits
+    consolidation::phase_compress(&memory, &llm).await;
+
     // Phase 4: capture dream
     let dream = sleep_agent.run_state_as_sleeping_mut().take_dream();
 
@@ -177,7 +190,7 @@ async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent
         tracing::error!("Failed to write sleep record: {}", e);
     }
 
-    // Phase 6: git commit sleep artifacts
+    // Phase 6: commit sleep artifacts
     if let Err(e) = crate::data_git::commit_all(&data_dir, &format!("sleep done: {}", snapshot_ts))
     {
         tracing::error!("Failed to commit sleep data: {}", e);
@@ -200,7 +213,7 @@ async fn execute_sleep(agent: Agent, event_tx: &mpsc::Sender<AppEvent>) -> Agent
         }
     }
 
-    // Phase 8: build new awake agent with dream afterglow
+    // Phase 8: wake up with dream afterglow
     let mut new_agent = Agent::awake(config);
 
     {

@@ -3,11 +3,11 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
+use crate::episode::Episode;
 use crate::memory::MemoryManager;
 use crate::tools::Tool;
 
 /// A dreaming tool that captures the agent's dream during sleep.
-/// The dream content is stored in a shared Arc<Mutex<Option<String>>>.
 pub struct DreamTool {
     dream: Arc<Mutex<Option<String>>>,
 }
@@ -50,131 +50,78 @@ impl Tool for DreamTool {
     }
 }
 
-macro_rules! define_edit_tool {
-    ($name:ident, $tool_name:expr, $desc:expr, $read_fn:ident, $write_fn:ident) => {
-        pub struct $name {
-            memory: Arc<MemoryManager>,
-        }
-
-        impl $name {
-            pub fn new(memory: Arc<MemoryManager>) -> Self {
-                Self { memory }
-            }
-        }
-
-        #[async_trait]
-        impl Tool for $name {
-            fn name(&self) -> &str {
-                $tool_name
-            }
-
-            fn description(&self) -> &str {
-                $desc
-            }
-
-            fn parameters(&self) -> Value {
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["edit", "append", "rewrite"],
-                            "description": "edit=搜索替换, append=追加, rewrite=重写全部"
-                        },
-                        "search": {
-                            "type": "string",
-                            "description": "要搜索的文本（edit 模式）"
-                        },
-                        "replace": {
-                            "type": "string",
-                            "description": "替换后的文本（edit 模式）"
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "新内容（append/rewrite 模式）"
-                        }
-                    },
-                    "required": ["action"]
-                })
-            }
-
-            async fn execute(&self, args: Value) -> anyhow::Result<String> {
-                let action = args["action"]
-                    .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("missing 'action'"))?;
-
-                match action {
-                    "edit" => {
-                        let search = args["search"]
-                            .as_str()
-                            .ok_or_else(|| anyhow::anyhow!("missing 'search' for edit"))?;
-                        let replace = args["replace"]
-                            .as_str()
-                            .ok_or_else(|| anyhow::anyhow!("missing 'replace' for edit"))?;
-                        let content = self.memory.$read_fn();
-                        if search == replace {
-                            return Err(anyhow::anyhow!("search and replace are identical"));
-                        }
-                        let count = content.matches(search).count();
-                        if count == 0 {
-                            return Err(anyhow::anyhow!(
-                                "未找到匹配文本。当前文件内容：\n{}",
-                                &content[..content.floor_char_boundary(500)]
-                            ));
-                        }
-                        if count > 1 {
-                            return Err(anyhow::anyhow!(
-                                "找到 {} 处匹配，需要更具体的搜索文本",
-                                count
-                            ));
-                        }
-                        let updated = content.replacen(search, replace, 1);
-                        self.memory.$write_fn(&updated);
-                        Ok(format!("{}已更新。", $tool_name))
-                    }
-                    "append" => {
-                        let content = args["content"]
-                            .as_str()
-                            .ok_or_else(|| anyhow::anyhow!("missing 'content' for append"))?;
-                        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
-                        let entry = format!("## {}\n{}\n", date, content);
-                        let existing = self.memory.$read_fn();
-                        let updated = format!("{}\n{}", existing.trim_end(), entry);
-                        self.memory.$write_fn(&updated);
-                        Ok(format!("已追加到{}。", $tool_name))
-                    }
-                    "rewrite" => {
-                        let content = args["content"]
-                            .as_str()
-                            .ok_or_else(|| anyhow::anyhow!("missing 'content' for rewrite"))?;
-                        self.memory.$write_fn(content);
-                        Ok(format!("{}已重写。", $tool_name))
-                    }
-                    _ => Err(anyhow::anyhow!("Unknown action: {}", action)),
-                }
-            }
-        }
-    };
+/// Sleep tool for writing episode entries.
+pub struct WriteEpisodeTool {
+    memory: Arc<MemoryManager>,
 }
 
-define_edit_tool!(
-    EditSoulTool,
-    "edit_soul",
-    "审视你的性格、行为方式、处世态度、世界观。",
-    read_soul,
-    write_soul
-);
-define_edit_tool!(
-    EditMemoryTool,
-    "edit_memory",
-    "整理你的记忆。",
-    read_memory,
-    write_memory
-);
-define_edit_tool!(
-    EditProfileTool,
-    "edit_profile",
-    "更新你对用户的认知。",
-    read_user_profile,
-    write_user_profile
-);
+impl WriteEpisodeTool {
+    pub fn new(memory: Arc<MemoryManager>) -> Self {
+        Self { memory }
+    }
+}
+
+#[async_trait]
+impl Tool for WriteEpisodeTool {
+    fn name(&self) -> &str {
+        "write_episode"
+    }
+
+    fn description(&self) -> &str {
+        "将一段经历或感悟写入记忆的情景区。每条 episode 只聚焦一个主题或一次重要的对话——不要试图把一整天塞进一条。清醒期有多个值得记住的片段时，分别写成多条。"
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "description": "日期，格式 YYYY-MM-DD"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "要记录的内容"
+                },
+                "emotional_weight": {
+                    "type": "integer",
+                    "description": "情感权重 1-5，默认 3",
+                    "minimum": 1,
+                    "maximum": 5
+                },
+                "afterglow": {
+                    "type": "string",
+                    "description": "这段经历的余韵"
+                }
+            },
+            "required": ["date", "content"]
+        })
+    }
+
+    async fn execute(&self, args: Value) -> anyhow::Result<String> {
+        let date = args["date"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("missing 'date'"))?;
+        let content = args["content"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("missing 'content'"))?;
+
+        let weight = args.get("emotional_weight")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u8)
+            .unwrap_or(3);
+        let afterglow = args.get("afterglow")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let mut ep = Episode::new(date.to_string(), content.to_string());
+        ep.emotional_weight = weight.clamp(1, 5);
+        if !afterglow.is_empty() {
+            ep.afterglow = afterglow;
+        }
+
+        self.memory.append_episode(&ep)?;
+        Ok(format!("已记录情景「{}」。", date))
+    }
+}

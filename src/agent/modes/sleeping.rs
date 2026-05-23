@@ -33,9 +33,7 @@ impl SleepingMode {
         let dream: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
         let mut reg = ToolRegistry::new();
-        reg.register(Box::new(tools::EditSoulTool::new(memory.clone())));
-        reg.register(Box::new(tools::EditMemoryTool::new(memory.clone())));
-        reg.register(Box::new(tools::EditProfileTool::new(memory)));
+        reg.register(Box::new(tools::WriteEpisodeTool::new(memory.clone())));
         reg.register(Box::new(tools::DreamTool::new(dream.clone())));
 
         Self {

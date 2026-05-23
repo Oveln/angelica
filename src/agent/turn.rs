@@ -73,6 +73,7 @@ impl Agent {
         if !has_system {
             messages.push(self.build_system_message());
         }
+
         messages.extend(history.to_vec());
         messages
     }
