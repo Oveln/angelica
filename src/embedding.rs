@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use serde::Deserialize;
 
@@ -9,7 +11,7 @@ struct EmbedResponse {
     embeddings: Vec<Vec<f32>>,
 }
 
-/// Compute embedding for a single text input via ollama.
+/// Compute embedding for a single text input.
 pub async fn embed(config: &EmbeddingConfig, text: &str) -> Result<Vec<f32>> {
     let base_url = config.base_url.trim_end_matches('/');
     let url = format!("{}/api/embed", base_url);
@@ -18,8 +20,18 @@ pub async fn embed(config: &EmbeddingConfig, text: &str) -> Result<Vec<f32>> {
         "input": text
     });
 
-    let client = reqwest::Client::new();
-    let resp = client.post(&url).json(&body).send().await?;
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
+
+    let mut req = client.post(&url).json(&body);
+    if !config.api_key_env.is_empty() {
+        if let Ok(key) = std::env::var(&config.api_key_env) {
+            req = req.bearer_auth(&key);
+        }
+    }
+    let resp = req.send().await?;
 
     if !resp.status().is_success() {
         let status = resp.status();

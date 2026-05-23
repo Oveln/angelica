@@ -67,7 +67,6 @@ impl Agent<SleepingMode> {
     ) -> Agent<AwakeMode> {
         use crate::agent::events::AppEvent;
 
-        use crate::llm::LlmClient;
         use crate::sleep::consolidation;
 
         let data_dir = self.config.state.data_dir();
@@ -93,10 +92,9 @@ impl Agent<SleepingMode> {
         let transitioned =
             consolidation::phase_transition_and_embed(&self.memory, &embed_config).await;
 
-        let llm = LlmClient::new(&self.config.llm);
-        consolidation::phase_consolidate(&self.memory, &llm, &transitioned).await;
+        consolidation::phase_consolidate(&self.memory, &self.llm, &transitioned).await;
 
-        consolidation::phase_compress(&self.memory, &llm).await;
+        consolidation::phase_compress(&self.memory, &self.llm).await;
 
         let dream = self.run_state.take_dream();
         let (turns, tool_calls, fatigue_val) = self.run_state.pre_sleep_stats();

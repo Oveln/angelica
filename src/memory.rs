@@ -49,6 +49,26 @@ impl MemoryManager {
             std::fs::write(path, content).ok();
         }
     }
+    /// Read a file, truncated to max_file_size_kb.
+    fn read_capped(&self, path: &PathBuf) -> String {
+        let max_bytes = self.config.max_file_size_kb * 1024;
+        match std::fs::read(path) {
+            Ok(bytes) => {
+                if bytes.len() <= max_bytes {
+                    String::from_utf8_lossy(&bytes).into_owned()
+                } else {
+                    // Find last valid UTF-8 char boundary at or before max_bytes
+                    let mut end = max_bytes;
+                    while end > 0 && (bytes[end] & 0xC0) == 0x80 {
+                        end -= 1;
+                    }
+                    String::from_utf8_lossy(&bytes[..end]).into_owned()
+                }
+            }
+            Err(_) => String::new(),
+        }
+    }
+
 
     // ── Episodes ──
 
@@ -102,8 +122,9 @@ impl MemoryManager {
         let found: Vec<&Episode> = results.iter().map(|(i, _)| &episodes[*i]).collect();
         let mut out = String::new();
         for ep in &found {
-            out.push_str(&format!("- {}\n", ep.date));
-            out.push_str(&format!("  {}\n", ep.body));
+            out.push_str(&format!("事情发生的时间: {}\n", ep.date));
+            out.push_str(&format!("回忆的内容: {}\n", ep.body));
+            out.push_str(&format!("当时的感受: {}\n", ep.afterglow));
         }
         (out, top_score)
     }
@@ -142,7 +163,8 @@ impl MemoryManager {
 
     pub fn read_self(&self) -> String {
         Self::ensure_file(&self.self_path, DEFAULT_SELF);
-        std::fs::read_to_string(&self.self_path).unwrap_or_else(|_| DEFAULT_SELF.to_string())
+        let content = self.read_capped(&self.self_path);
+        if content.is_empty() { DEFAULT_SELF.to_string() } else { content }
     }
 
     pub fn write_self(&self, content: &str) {
@@ -167,7 +189,7 @@ impl MemoryManager {
     pub fn read_user_profile(&self) -> String {
         let path = self.profile_path(&self.default_profile_name());
         Self::ensure_file(&path, "# User Profile\n");
-        std::fs::read_to_string(&path).unwrap_or_default()
+        self.read_capped(&path)
     }
 
     pub fn write_user_profile(&self, content: &str) {
@@ -194,7 +216,7 @@ impl MemoryManager {
 
     pub fn read_notebook(&self) -> String {
         if self.notebook_path.exists() {
-            std::fs::read_to_string(&self.notebook_path).unwrap_or_default()
+            self.read_capped(&self.notebook_path)
         } else {
             String::new()
         }
@@ -208,7 +230,7 @@ impl MemoryManager {
     pub fn append_notebook(&self, content: &str) {
         Self::ensure_parent(&self.notebook_path);
         let existing = if self.notebook_path.exists() {
-            std::fs::read_to_string(&self.notebook_path).unwrap_or_default()
+            self.read_capped(&self.notebook_path)
         } else {
             String::new()
         };

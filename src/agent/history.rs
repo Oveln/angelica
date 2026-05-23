@@ -141,34 +141,55 @@ impl History {
         for msg in self.messages.iter_mut().rev() {
             if msg.tool_call_id.as_deref() == Some(tc_id) {
                 msg.content = Some(content.clone());
-                self.rewrite_file();
+                self.patch_line_in_file(tc_id, &content);
                 return;
             }
         }
         self.record_tool_result(tc_id.to_string(), content);
     }
 
-    fn rewrite_file(&mut self) {
-        self.buf_writer = None;
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-        if let Ok(file) = std::fs::File::create(&self.path) {
-            let mut writer = std::io::BufWriter::new(file);
-            for msg in &self.messages {
-                let tm = TimedMessage {
-                    ts: chrono::Local::now().to_rfc3339(),
-                    message: msg.clone(),
-                };
-                if let Ok(json) = serde_json::to_string(&tm) {
-                    let _ = writeln!(writer, "{}", json);
+    /// Update a single line in the JSONL file matching the given tool_call_id.
+    /// Avoids rewriting the entire file, preserving original timestamps on other lines.
+    fn patch_line_in_file(&mut self, tc_id: &str, content: &str) {
+        self.flush();
+        let Ok(file_content) = std::fs::read_to_string(&self.path) else {
+            return;
+        };
+        let mut patched = false;
+        let mut out = String::with_capacity(file_content.len());
+        for line in file_content.lines() {
+            if patched || line.trim().is_empty() {
+                out.push_str(line);
+                out.push('\n');
+                continue;
+            }
+            if let Ok(tm) = serde_json::from_str::<TimedMessage>(line) {
+                if tm.message.tool_call_id.as_deref() == Some(tc_id) {
+                    let updated = TimedMessage {
+                        ts: tm.ts,
+                        message: ChatMessage {
+                            content: Some(content.to_string()),
+                            ..tm.message
+                        },
+                    };
+                    if let Ok(json) = serde_json::to_string(&updated) {
+                        out.push_str(&json);
+                        out.push('\n');
+                        patched = true;
+                        continue;
+                    }
                 }
             }
-            if let Err(e) = writer.flush() {
-                tracing::warn!("Failed to flush rewritten history: {}", e);
-            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        if patched {
+            // Invalidate buf_writer since we're replacing the file
+            self.buf_writer = None;
+            let _ = std::fs::write(&self.path, out);
         }
     }
+
 
     pub fn messages(&self) -> &[ChatMessage] {
         &self.messages

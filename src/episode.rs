@@ -18,8 +18,6 @@ pub struct Episode {
     #[serde(default = "default_weight")]
     pub emotional_weight: u8,
     #[serde(default)]
-    pub unresolved: bool,
-    #[serde(default)]
     pub afterglow: String,
     #[serde(default = "default_status")]
     pub status: EpisodeStatus,
@@ -44,7 +42,6 @@ impl Episode {
             date,
             body,
             emotional_weight: 3,
-            unresolved: false,
             afterglow: String::new(),
             status: EpisodeStatus::Recent,
             embedding: Vec::new(),
@@ -62,10 +59,6 @@ impl Episode {
         self
     }
 
-    pub fn with_unresolved(mut self, u: bool) -> Self {
-        self.unresolved = u;
-        self
-    }
 }
 
 /// Read all episodes from a JSONL file.
@@ -98,11 +91,15 @@ pub fn write_all_episodes(path: &std::path::Path, episodes: &[Episode]) -> anyho
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut file = std::fs::File::create(path)?;
+    let parent = path.parent().unwrap_or(path);
+    let tmp_path = parent.join(format!(".episodes.{}.tmp", std::process::id()));
+    let mut file = std::fs::File::create(&tmp_path)?;
     for ep in episodes {
         let json = serde_json::to_string(ep)?;
         writeln!(file, "{}", json)?;
     }
+    file.flush()?;
+    std::fs::rename(&tmp_path, path)?;
     Ok(())
 }
 
