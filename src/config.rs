@@ -319,12 +319,6 @@ pub struct StateConfig {
     pub path: String,
     #[serde(default = "default_conversation_path")]
     pub conversation_path: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    archive_dir: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    max_snapshots: usize,
 }
 
 impl StateConfig {
@@ -342,8 +336,6 @@ impl Default for StateConfig {
         Self {
             path: default_state_path(),
             conversation_path: default_conversation_path(),
-            archive_dir: String::new(),
-            max_snapshots: 0,
         }
     }
 }

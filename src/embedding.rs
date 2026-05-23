@@ -1,20 +1,7 @@
 use anyhow::Result;
 use serde::Deserialize;
 
-#[derive(Debug, Clone)]
-pub struct EmbeddingConfig {
-    pub model: String,
-    pub base_url: String,
-}
-
-impl EmbeddingConfig {
-    pub fn from_config(config: &crate::config::EmbeddingConfig) -> Self {
-        Self {
-            model: config.model.clone(),
-            base_url: config.base_url.trim_end_matches('/').to_string(),
-        }
-    }
-}
+use crate::config::EmbeddingConfig;
 
 #[derive(Deserialize)]
 struct EmbedResponse {
@@ -24,7 +11,8 @@ struct EmbedResponse {
 
 /// Compute embedding for a single text input via ollama.
 pub async fn embed(config: &EmbeddingConfig, text: &str) -> Result<Vec<f32>> {
-    let url = format!("{}/api/embed", config.base_url);
+    let base_url = config.base_url.trim_end_matches('/');
+    let url = format!("{}/api/embed", base_url);
     let body = serde_json::json!({
         "model": config.model,
         "input": text

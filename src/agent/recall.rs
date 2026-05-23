@@ -24,7 +24,7 @@ impl<S: RunMode> Agent<S> {
         };
         let assistant_text = assistant_content.unwrap_or("").to_string();
 
-        let embed_config = embedding::EmbeddingConfig::from_config(&self.config.embedding);
+        let embed_config = &self.config.embedding;
         let result = embedding::embed_turn(&embed_config, &user_text, &assistant_text).await;
 
         match result {

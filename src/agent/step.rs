@@ -4,7 +4,7 @@ use super::Agent;
 use super::events::AppEvent;
 use super::group::group_tool_calls;
 use super::modes::RunMode;
-use super::tooling::ProcessOutcome;
+use super::dispatch::ProcessOutcome;
 use crate::llm::LlmResponse;
 
 impl<S: RunMode> Agent<S> {

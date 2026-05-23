@@ -86,33 +86,51 @@ main()
 
 | 模块 | 职责 |
 |---|---|
-| `src/agent/mod.rs` | ReAct 循环——灵的思考与行动核心 |
-| `src/agent/history.rs` | 对话历史（`Vec<ChatMessage>`） |
+| `src/agent/mod.rs` | Agent 结构体、共享方法、AwakeMode 构造/关闭 |
+| `src/agent/transition.rs` | 模式转换：清醒→沉睡→清醒 |
+| `src/agent/step.rs` | LLM 回合循环（`step()`）+ 流式处理 + usage 记录 |
+| `src/agent/dispatch.rs` | 工具调度：权限检查、审批/拒绝、批量编辑 |
+| `src/agent/turn.rs` | 单步 LLM 调用 + 消息组装 |
+| `src/agent/recall.rs` | Embedding 召回：每轮结束后搜索过往 episode |
+| `src/agent/history.rs` | 对话历史（JSONL 持久化） |
 | `src/agent/events.rs` | `AppEvent` 和 `UserAction` 枚举定义 |
 | `src/agent/group.rs` | 工具调用分组/批处理 |
-| `src/llm/mod.rs` | LLM API 客户端，SSE 流式（灵的思维来源） |
-| `src/llm/types.rs` | `ChatMessage`、`ToolCall`、`ChatResponse` 类型 |
-| `src/tools/` | 感知与行动能力（文件读写、命令执行等） |
-| `src/memory.rs` | 三重记忆系统：记忆、用户画像、灵魂 |
-| `src/session.rs` | 会话持久化到 `data/sessions/` |
-| `src/skills/` | 从 `skills/` 目录发现技能 |
+| `src/agent/modes/` | RunMode trait + AwakeMode + SleepingMode |
+| `src/llm/mod.rs` | LLM API 客户端（genai），流式/非流式 |
+| `src/llm/types.rs` | `ChatMessage`、`ToolCall`、`ToolSpec` 类型 |
+| `src/llm/patch.rs` | DeepSeek 角色沉浸补丁 |
+| `src/tools/` | 工具实现 + Tool trait + ToolRegistry |
+| `src/memory.rs` | 记忆管理：episodes、SELF、profiles、notebook |
+| `src/episode.rs` | Episode 数据模型 + JSONL 读写 + embedding 搜索 |
+| `src/embedding.rs` | Ollama embedding 调用 |
+| `src/sleep/` | 睡眠机制：consolidation（沉淀/压缩）+ 睡眠工具 |
+| `src/fatigue.rs` | 疲劳模型（累积、恢复、阈值） |
+| `src/state/` | AgentState 持久化（疲劳、梦境、苏醒时间） |
+| `src/usage.rs` | Token 用量统计与聚合 |
+| `src/data_git.rs` | data 目录的 git 版本管理 |
+| `src/permission.rs` | 权限评估：glob 模式匹配 + 会话/持久化规则 |
 | `src/config.rs` | TOML 配置反序列化与路径解析 |
+| `src/skills/` | 技能发现（从 skills/ 目录加载 SKILL.md） |
 | `src/tui/` | 终端 UI（应用循环、渲染、模式、主题） |
 | `src/mcp/` | MCP 客户端（桩实现，尚未完成） |
 
-### 三重记忆
+### 持久化数据
 
-灵的自我由三个持久化文件构成：
+灵的自我由以下数据文件构成：
 
-- **`data/agent_memory.md`** — 灵的经历与记忆，按日期组织，超限时从旧到新裁剪
-- **`data/user_profile.md`** — 灵对用户的理解
-- **`data/SOUL.md`** — 灵的人格定义
+- **`data/SELF.md`** — 灵的自我认知（性格、世界观、处世态度）
+- **`data/episodes.jsonl`** — 情景记忆（Recent/Past 生命周期，embedding 索引）
+- **`data/profiles/ov.md`** — 灵对用户的理解
+- **`data/state.json`** — 运行时状态（疲劳值、梦境、苏醒时间）
+- **`data/conversation.jsonl`** — 当前清醒期的对话历史
+- **`data/usage.jsonl`** — Token 用量统计
+- **`data/history/`** — 每次睡眠周期的快照（对话存档 + 睡眠记录）
 
 `MemoryManager` 通过 `Arc` 在 Agent 与工具之间共享。所有方法都是 `&self`，通过文件系统实现持久化。
 
 ### 共享所有权
 
-`Arc<MemoryManager>` 和 `Arc<SessionManager>` 在核心与工具之间共享。其余资源由 Agent 独占。
+`Arc<MemoryManager>` 和 `Arc<SkillRegistry>` 在核心与工具之间共享。其余资源由 Agent 独占。
 
 ### Tool Trait
 

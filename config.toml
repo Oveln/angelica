@@ -1,10 +1,14 @@
+# Angelica Configuration
+# All paths are relative to the config file's parent directory.
+
 [llm]
 model = "deepseek-v4-flash"
 base_url = "https://api.deepseek.com"
+# api_key = ""                    # or set DEEPSEEK_API_KEY / OPENAI_API_KEY env
 max_tokens = 4096
 temperature = 0.7
 thinking = true
-reasoning_effort = "high"
+reasoning_effort = "high"        # low, medium, high
 max_iterations = 15
 
 [memory]
@@ -12,16 +16,16 @@ episodes_path = "data/episodes.jsonl"
 self_path = "data/SELF.md"
 profiles_dir = "data/profiles"
 notebook_path = "data/notebook.md"
-recent_threshold = 5
-episode_inject_budget = 2
+recent_threshold = 5             # max recent episodes in system prompt
+episode_inject_budget = 2        # max recalled past episodes per turn
 recall_similarity_threshold = 0.6
-recall_inject_threshold = 0.7
-recall_inject_probability = 0.6
-self_hard_limit = 8192
+recall_inject_threshold = 0.7    # min score to consider injecting recall
+recall_inject_probability = 0.6  # chance of injecting when threshold met
+self_hard_limit = 8192           # chars; triggers compression on sleep
 profile_hard_limit = 8192
 
 [embedding]
-provider = "ollama"
+provider = "ollama"              # currently only ollama supported
 model = "qwen3-embedding"
 base_url = "http://localhost:11434"
 
@@ -31,12 +35,17 @@ directory = "skills"
 [state]
 path = "data/state.json"
 conversation_path = "data/conversation.jsonl"
-archive_dir = "data/archive"
-snapshots_dir = "data/snapshots"
-max_snapshots = 20
+
+[permission]
+default = "ask"                  # ask, allow, deny
+# approved_path = "data/approved_rules.toml"
+# Per-tool overrides:
+# [[permission.tools]]
+# tool = "read_file"
+# target = "*"
+# action = "allow"
 
 [fatigue]
-reference_context_window = 64000
 per_turn_base = 0.015
 per_tool_call_ratio = 0.333
 sleep_threshold = 1.0

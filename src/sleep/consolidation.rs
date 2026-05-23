@@ -2,7 +2,8 @@ use anyhow::Result;
 use serde::Deserialize;
 use tracing;
 
-use crate::embedding::{self, EmbeddingConfig};
+use crate::embedding;
+use crate::config::EmbeddingConfig;
 use crate::episode::Episode;
 use crate::llm::LlmClient;
 use crate::llm::RequestOptions;

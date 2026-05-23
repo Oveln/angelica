@@ -2,7 +2,7 @@ pub mod edit_file;
 pub mod list_dir;
 pub mod notebook;
 pub mod read_file;
-pub mod recall;
+pub mod history_search;
 pub mod run_command;
 pub mod skill;
 pub mod write_file;
@@ -68,7 +68,7 @@ impl ToolRegistry {
         reg.register(Box::new(run_command::RunCommandTool));
         reg.register(Box::new(skill::SkillTool::new(skills)));
         reg.register(Box::new(notebook::NotebookTool::new(memory)));
-        reg.register(Box::new(recall::RecallTool::new(
+        reg.register(Box::new(history_search::RecallTool::new(
             std::path::PathBuf::from(history_dir),
             std::path::PathBuf::from(conversation_path),
         )));
