@@ -53,10 +53,10 @@ mod tests {
 
     fn test_fatigue_config() -> FatigueConfig {
         FatigueConfig {
-            per_turn_base: 0.015,
-            per_tool_call_ratio: 0.333,
-            sleep_threshold: 1.0,
-            can_sleep_threshold: 0.8,
+            max_context_tokens: 100_000,
+            curve_exponent: 1.5,
+            sleep_threshold: 0.85,
+            can_sleep_threshold: 0.6,
             groggy_turns: 3,
         }
     }

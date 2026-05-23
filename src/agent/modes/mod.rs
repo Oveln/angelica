@@ -20,6 +20,7 @@ pub trait RunMode: Send + Sync + 'static {
 
     fn permission_rules(&self) -> Vec<(String, Vec<TargetRule>)>;
 
+    fn on_context_update(&mut self, _prompt_tokens: u64) {}
     fn on_turn_complete(&mut self, _content: Option<&str>) {}
     fn on_tool_calls(&mut self, _count: usize) {}
 

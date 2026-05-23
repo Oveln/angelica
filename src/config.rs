@@ -349,47 +349,7 @@ fn default_conversation_path() -> String {
 
 // ── Fatigue ──
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct FatigueConfig {
-    #[serde(default = "default_per_turn_base")]
-    pub per_turn_base: f64,
-    #[serde(default = "default_per_tool_call_ratio")]
-    pub per_tool_call_ratio: f64,
-    #[serde(default = "default_sleep_threshold")]
-    pub sleep_threshold: f64,
-    #[serde(default = "default_can_sleep_threshold")]
-    pub can_sleep_threshold: f64,
-    #[serde(default = "default_groggy_turns")]
-    pub groggy_turns: u32,
-}
 
-impl Default for FatigueConfig {
-    fn default() -> Self {
-        Self {
-            per_turn_base: default_per_turn_base(),
-            per_tool_call_ratio: default_per_tool_call_ratio(),
-            sleep_threshold: default_sleep_threshold(),
-            can_sleep_threshold: default_can_sleep_threshold(),
-            groggy_turns: default_groggy_turns(),
-        }
-    }
-}
-
-fn default_per_turn_base() -> f64 {
-    0.015
-}
-fn default_per_tool_call_ratio() -> f64 {
-    0.333
-}
-fn default_sleep_threshold() -> f64 {
-    1.0
-}
-fn default_can_sleep_threshold() -> f64 {
-    0.8
-}
-fn default_groggy_turns() -> u32 {
-    3
-}
 
 #[cfg(test)]
 mod tests {
@@ -424,5 +384,45 @@ model = "qwen3-embedding"
         assert_eq!(config.llm.model, "deepseek-v4-pro");
         assert!(!config.llm.thinking);
         assert_eq!(config.memory.recent_threshold, 3);
+    }
+}
+fn default_max_context_tokens() -> u64 {
+    120_000
+}
+fn default_curve_exponent() -> f64 {
+    1.0
+}
+fn default_sleep_threshold() -> f64 {
+    0.85
+}
+fn default_can_sleep_threshold() -> f64 {
+    0.6
+}
+fn default_groggy_turns() -> u32 {
+    3
+}
+#[derive(Debug, Deserialize, Clone)]
+pub struct FatigueConfig {
+    #[serde(default = "default_max_context_tokens")]
+    pub max_context_tokens: u64,
+    #[serde(default = "default_curve_exponent")]
+    pub curve_exponent: f64,
+    #[serde(default = "default_sleep_threshold")]
+    pub sleep_threshold: f64,
+    #[serde(default = "default_can_sleep_threshold")]
+    pub can_sleep_threshold: f64,
+    #[serde(default = "default_groggy_turns")]
+    pub groggy_turns: u32,
+}
+
+impl Default for FatigueConfig {
+    fn default() -> Self {
+        Self {
+            max_context_tokens: default_max_context_tokens(),
+            curve_exponent: default_curve_exponent(),
+            sleep_threshold: default_sleep_threshold(),
+            can_sleep_threshold: default_can_sleep_threshold(),
+            groggy_turns: default_groggy_turns(),
+        }
     }
 }

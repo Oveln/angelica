@@ -130,6 +130,10 @@ impl RunMode for AwakeMode {
         self.builtin_rules()
     }
 
+    fn on_context_update(&mut self, prompt_tokens: u64) {
+        self.state.fatigue.update_from_context(prompt_tokens);
+    }
+
     fn on_turn_complete(&mut self, _content: Option<&str>) {
         self.state.fatigue.on_turn();
         if !self.state.fatigue.is_groggy() && self.state.dream.is_some() {
@@ -138,9 +142,7 @@ impl RunMode for AwakeMode {
     }
 
     fn on_tool_calls(&mut self, count: usize) {
-        for _ in 0..count {
-            self.state.fatigue.on_tool_call();
-        }
+        self.state.fatigue.add_tool_calls(count as u32);
     }
 
     fn fatigue_update_event(&self) -> Option<AppEvent> {

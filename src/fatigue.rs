@@ -2,14 +2,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::FatigueConfig;
 
+/// Fatigue derived directly from context window usage.
+///
+///   fatigue = (prompt_tokens / max_context_tokens) ^ (exponent + 1)
+///
+/// The power curve guarantees fatigue = 1.0 exactly when context hits the limit.
+/// Early in the conversation fatigue grows slowly; near the limit it accelerates.
 #[derive(Debug, Clone)]
 pub struct FatigueModel {
     pub(crate) fatigue: f64,
     pub(crate) turns: u32,
     pub(crate) tool_calls: u32,
-    pub(crate) base_per_turn: f64,
     pub(crate) groggy_turns: u32,
-    pub(crate) tool_call_divisor: f64,
+    pub(crate) max_context_tokens: u64,
+    pub(crate) curve_exponent: f64,
     pub(crate) sleep_threshold: f64,
     pub(crate) can_sleep_threshold: f64,
     pub(crate) groggy_turns_on_wake: u32,
@@ -21,26 +27,29 @@ impl FatigueModel {
             fatigue: 0.0,
             turns: 0,
             tool_calls: 0,
-            base_per_turn: config.per_turn_base,
             groggy_turns: 0,
-            tool_call_divisor: 1.0 / config.per_tool_call_ratio.max(0.001),
+            max_context_tokens: config.max_context_tokens.max(1),
+            curve_exponent: config.curve_exponent.max(1.0),
             sleep_threshold: config.sleep_threshold,
             can_sleep_threshold: config.can_sleep_threshold,
             groggy_turns_on_wake: config.groggy_turns,
         }
     }
 
+    pub fn update_from_context(&mut self, prompt_tokens: u64) {
+        let ratio = (prompt_tokens as f64 / self.max_context_tokens as f64).min(1.0);
+        self.fatigue = ratio.powf(self.curve_exponent + 1.0);
+    }
+
     pub fn on_turn(&mut self) {
         self.turns += 1;
-        self.fatigue = (self.fatigue + self.base_per_turn).min(1.0);
         if self.groggy_turns > 0 {
             self.groggy_turns -= 1;
         }
     }
 
-    pub fn on_tool_call(&mut self) {
-        self.tool_calls += 1;
-        self.fatigue = (self.fatigue + self.base_per_turn / self.tool_call_divisor).min(1.0);
+    pub fn add_tool_calls(&mut self, count: u32) {
+        self.tool_calls += count;
     }
 
     pub fn with_persisted(mut self, fatigue: f64, turns: u32, tool_calls: u32) -> Self {
@@ -134,11 +143,11 @@ impl<'de> Deserialize<'de> for FatigueModel {
             fatigue: p.fatigue,
             turns: p.turns,
             tool_calls: p.tool_calls,
-            base_per_turn: 0.015,
             groggy_turns: 0,
-            tool_call_divisor: 3.003,
-            sleep_threshold: 1.0,
-            can_sleep_threshold: 0.8,
+            max_context_tokens: 120_000,
+            curve_exponent: 1.0,
+            sleep_threshold: 0.85,
+            can_sleep_threshold: 0.6,
             groggy_turns_on_wake: 3,
         })
     }
@@ -151,48 +160,90 @@ mod tests {
 
     fn test_fatigue_config() -> FatigueConfig {
         FatigueConfig {
-            per_turn_base: 0.015,
-            per_tool_call_ratio: 0.333,
-            sleep_threshold: 1.0,
-            can_sleep_threshold: 0.8,
+            max_context_tokens: 100_000,
+            curve_exponent: 1.0,
+            sleep_threshold: 0.85,
+            can_sleep_threshold: 0.6,
             groggy_turns: 3,
         }
     }
 
     #[test]
-    fn fatigue_accumulates_on_turn() {
+    fn fatigue_from_context() {
         let config = test_fatigue_config();
         let mut model = FatigueModel::new(&config);
-        assert!((model.base_per_turn - 0.015).abs() < 1e-6);
-        model.on_turn();
-        assert!((model.fatigue() - 0.015).abs() < 1e-6);
+        // ratio=0.5, power=2, fatigue=0.25
+        model.update_from_context(50_000);
+        assert!((model.fatigue() - 0.25).abs() < 1e-6);
     }
 
     #[test]
-    fn fatigue_config_controls_base() {
-        let config = FatigueConfig {
-            per_turn_base: 0.03,
-            ..test_fatigue_config()
-        };
-        let model = FatigueModel::new(&config);
-        assert!((model.base_per_turn - 0.03).abs() < 1e-6);
+    fn fatigue_reaches_one_at_max() {
+        let config = test_fatigue_config();
+        let mut model = FatigueModel::new(&config);
+        model.update_from_context(100_000);
+        assert!((model.fatigue() - 1.0).abs() < 1e-6);
     }
 
     #[test]
-    fn fatigue_caps_at_one() {
+    fn fatigue_capped_at_one() {
         let config = test_fatigue_config();
         let mut model = FatigueModel::new(&config);
-        model.fatigue = 0.999;
-        model.on_turn();
+        model.update_from_context(150_000);
         assert_eq!(model.fatigue(), 1.0);
     }
 
     #[test]
-    fn on_wake_resets_fatigue() {
+    fn delta_increases_as_context_fills() {
         let config = test_fatigue_config();
         let mut model = FatigueModel::new(&config);
+
+        // Equal 20% chunks → increasing delta between consecutive steps
+        let mut deltas = Vec::new();
+        let mut prev = 0.0f64;
+        for tokens in [20_000, 40_000, 60_000, 80_000] {
+            model.update_from_context(tokens);
+            deltas.push(model.fatigue() - prev);
+            prev = model.fatigue();
+        }
+
+        for i in 1..deltas.len() {
+            assert!(
+                deltas[i] > deltas[i - 1],
+                "delta[{}]={} should > delta[{}]={}",
+                i, deltas[i], i - 1, deltas[i - 1]
+            );
+        }
+    }
+
+    #[test]
+    fn zero_tokens_zero_fatigue() {
+        let config = test_fatigue_config();
+        let mut model = FatigueModel::new(&config);
+        model.update_from_context(0);
+        assert_eq!(model.fatigue(), 0.0);
+    }
+
+    #[test]
+    fn on_turn_and_tool_calls_dont_affect_fatigue() {
+        let config = test_fatigue_config();
+        let mut model = FatigueModel::new(&config);
+        model.update_from_context(50_000);
+        let f = model.fatigue();
         model.on_turn();
+        model.add_tool_calls(3);
+        assert!((model.fatigue() - f).abs() < 1e-10);
+        assert_eq!(model.turns(), 1);
+        assert_eq!(model.tool_calls(), 3);
+    }
+
+    #[test]
+    fn on_wake_resets_everything() {
+        let config = test_fatigue_config();
+        let mut model = FatigueModel::new(&config);
+        model.update_from_context(80_000);
         model.on_turn();
+        model.add_tool_calls(2);
         assert!(model.fatigue() > 0.0);
         model.on_wake();
         assert_eq!(model.fatigue(), 0.0);
@@ -207,11 +258,11 @@ mod tests {
         let mut model = FatigueModel::new(&config);
         model.on_wake();
         assert!(model.is_groggy());
-        model.on_turn(); // 3 -> 2
+        model.on_turn();
         assert!(model.is_groggy());
-        model.on_turn(); // 2 -> 1
+        model.on_turn();
         assert!(model.is_groggy());
-        model.on_turn(); // 1 -> 0
+        model.on_turn();
         assert!(!model.is_groggy());
     }
 
@@ -237,41 +288,46 @@ mod tests {
     fn should_sleep_and_can_sleep() {
         let config = test_fatigue_config();
         let mut model = FatigueModel::new(&config);
+        // ratio=0.5 → fatigue=0.25
+        model.update_from_context(50_000);
         assert!(!model.should_sleep());
         assert!(!model.can_sleep());
-        model.fatigue = 0.8;
+        // ratio≈0.775 → fatigue≈0.6
+        model.update_from_context(77_500);
         assert!(!model.should_sleep());
         assert!(model.can_sleep());
-        model.fatigue = 1.0;
+        // ratio≈0.922 → fatigue≈0.85
+        model.update_from_context(92_200);
         assert!(model.should_sleep());
         assert!(model.can_sleep());
-    }
-
-    #[test]
-    fn configurable_thresholds() {
-        let config = FatigueConfig {
-            sleep_threshold: 0.5,
-            can_sleep_threshold: 0.3,
-            ..test_fatigue_config()
-        };
-        let mut model = FatigueModel::new(&config);
-        model.fatigue = 0.4;
-        assert!(!model.should_sleep());
-        assert!(model.can_sleep());
-        model.fatigue = 0.6;
-        assert!(model.should_sleep());
     }
 
     #[test]
     fn serde_roundtrip() {
         let config = test_fatigue_config();
         let mut model = FatigueModel::new(&config);
+        model.update_from_context(60_000);
         model.on_turn();
-        model.on_tool_call();
+        model.add_tool_calls(2);
         let json = serde_json::to_string(&model).unwrap();
         let restored: FatigueModel = serde_json::from_str(&json).unwrap();
         assert!((restored.fatigue() - model.fatigue()).abs() < 1e-4);
         assert_eq!(restored.turns(), model.turns());
         assert_eq!(restored.tool_calls(), model.tool_calls());
+    }
+
+    #[test]
+    fn higher_exponent_more_acceleration() {
+        let config = FatigueConfig {
+            max_context_tokens: 100_000,
+            curve_exponent: 2.0,
+            ..test_fatigue_config()
+        };
+        let mut model = FatigueModel::new(&config);
+        // ratio=0.5, power=3, fatigue=0.125
+        model.update_from_context(50_000);
+        assert!((model.fatigue() - 0.125).abs() < 1e-4);
+        model.update_from_context(100_000);
+        assert!((model.fatigue() - 1.0).abs() < 1e-4);
     }
 }

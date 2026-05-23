@@ -48,6 +48,11 @@ impl<S: RunMode> Agent<S> {
                 usage,
             } = llm_result;
 
+            // Update fatigue from current context size on every LLM response.
+            if let Some(ref metrics) = usage {
+                self.run_state.on_context_update(metrics.prompt_tokens);
+            }
+
             if self.run_state.accumulate_history() {
                 self.history.record_assistant(
                     content.clone(),
