@@ -1,4 +1,4 @@
-# AGENT.md
+# AGENTS.md
 
 本文件为 AI 编程助手提供代码仓库导航。
 
@@ -36,7 +36,7 @@ cargo fmt                    # 格式化
 RUST_LOG=debug cargo run     # 带 debug 日志运行
 ```
 
-配置从 `config.toml` 加载（或通过 `--config` 指定路径）。API Key 从 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY` 环境变量读取。
+配置搜索顺序：`--config` 参数 > `~/.config/angelica/config.toml` > 内置默认值。API Key 从 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY` 环境变量读取。
 
 ## 编码原则
 
@@ -95,11 +95,13 @@ main()
 | `src/agent/history.rs` | 对话历史（JSONL 持久化） |
 | `src/agent/events.rs` | `AppEvent` 和 `UserAction` 枚举定义 |
 | `src/agent/group.rs` | 工具调用分组/批处理 |
+| `src/agent/run.rs` | Agent 主循环入口 |
 | `src/agent/modes/` | RunMode trait + AwakeMode + SleepingMode |
 | `src/llm/mod.rs` | LLM API 客户端（genai），流式/非流式 |
 | `src/llm/types.rs` | `ChatMessage`、`ToolCall`、`ToolSpec` 类型 |
 | `src/llm/patch.rs` | DeepSeek 角色沉浸补丁 |
 | `src/tools/` | 工具实现 + Tool trait + ToolRegistry |
+| `src/prompt/mod.rs` | 系统提示词构建：清醒模式和睡眠模式各自的 prompt 组装 |
 | `src/memory.rs` | 记忆管理：episodes、SELF、profiles、notebook |
 | `src/episode.rs` | Episode 数据模型 + JSONL 读写 + embedding 搜索 |
 | `src/embedding.rs` | Ollama embedding 调用 |
@@ -123,6 +125,7 @@ main()
 - **`data/profiles/ov.md`** — 灵对用户的理解
 - **`data/state.json`** — 运行时状态（疲劳值、梦境、苏醒时间）
 - **`data/conversation.jsonl`** — 当前清醒期的对话历史
+- **`data/notebook.md`** — 自由笔记本
 - **`data/usage.jsonl`** — Token 用量统计
 - **`data/history/`** — 每次睡眠周期的快照（对话存档 + 睡眠记录）
 
@@ -134,7 +137,7 @@ main()
 
 ### Tool Trait
 
-工具实现 `Tool: Send + Sync`。需要用户审批的：`write_file`、`edit_file`、`run_command`。其余（`read_file`、`list_dir`、记忆更新等）自动执行。
+工具实现 `Tool: Send + Sync`。需要用户审批的：`write_file`、`edit_file`、`run_command`。其余（`read_file`、`list_dir`、`recall`、`notebook`、`skill`）自动执行。
 
 ### 会话持久化
 
@@ -143,6 +146,100 @@ main()
 ## 工作流程
 
 每次提交 commit 之前，必须用 subagent 对所有 staged 变更进行代码审阅。发现问题先修复，修复后再次审查，全部通过后再向用户确认是否提交。
+
+## 项目管理
+
+看板地址：https://github.com/users/Oveln/projects/2
+仓库：Oveln/angelica
+
+### 工具
+
+所有操作通过 `gh` CLI 在本地完成，不使用 GitHub AI 功能。
+
+### 看板结构
+
+```
+Backlog → Todo → In Progress → Done
+```
+
+- **Backlog** — 已创建但未确认优先级的 issue
+- **Todo** — 用户确认要做，排队等待
+- **In Progress** — 正在由 agent 实现
+- **Done** — 已完成并关闭
+
+### 流程
+
+#### 1. 创建 issue
+
+当用户要求审阅代码、提出改进建议、或讨论新功能时，agent 可以主动创建 issue。
+
+但**审阅 commit 变更**（提交前的代码审阅）时不要创建 issue，只报告问题并修复。
+
+```bash
+# 创建 issue（带合适的 label）
+gh issue create --title "简短描述" --body "## 问题\n...\n## 建议\n...\n**优先级**：高/中/低\n**模块**：..." --label "core"
+
+# 加入看板
+gh project item-add 2 --owner "@me" --url "https://github.com/Oveln/angelica/issues/<N>"
+
+# 新 issue 默认落在 Backlog
+```
+
+可用的 label：`core` `memory` `sleep` `tui` `infra` `philosophy`
+
+审阅代码时不要自动创建 issue。只报告发现，等用户决定是否创建。
+
+#### 2. 用户确认优先级
+
+用户在网页拖拽或 agent 执行：
+
+```bash
+# 查看当前看板
+gh project item-list 2 --owner "@me"
+
+# 移到 Todo（用户确认要做）
+gh project item-edit --project-id "PVT_kwHOAm30Hc4BYn74" \
+  --id "<ITEM_ID>" \
+  --field-id "PVTSSF_lAHOAm30Hc4BYn74zhTscXY" \
+  --single-select-option-id "e53ff850"   # Todo
+```
+
+Status option ID 对照：
+- Backlog: `a547bd41`
+- Todo: `e53ff850`
+- In Progress: `fc3e1d53`
+- Done: `df996501`
+
+#### 3. Agent 执行
+
+```bash
+# 1. 移到 In Progress
+gh project item-edit --project-id "PVT_kwHOAm30Hc4BYn74" \
+  --id "<ITEM_ID>" --field-id "PVTSSF_lAHOAm30Hc4BYn74zhTscXY" \
+  --single-select-option-id "fc3e1d53"
+
+# 2. 读取 issue 内容
+gh issue view <N>
+
+# 3. 实现代码（遵循编码原则和项目哲学）
+
+# 4. 测试
+cargo test && cargo clippy
+
+# 5. 完成后关闭 issue 并移到 Done
+gh issue close <N>
+gh project item-edit --project-id "PVT_kwHOAm30Hc4BYn74" \
+  --id "<ITEM_ID>" --field-id "PVTSSF_lAHOAm30Hc4BYn74zhTscXY" \
+  --single-select-option-id "df996501"
+```
+
+#### 4. 用户说"做下一个"
+
+Agent 应：
+1. `gh project item-list 2 --owner "@me"` 查看看板
+2. 找到 Todo 列中最前面的 issue
+3. 向用户确认要做的 issue
+4. 执行步骤 3
 
 ## 测试
 
