@@ -140,11 +140,6 @@ impl<S: RunMode> Agent<S> {
     }
 
     pub async fn initialize(&mut self) -> anyhow::Result<()> {
-        if !self.llm.is_configured() {
-            anyhow::bail!(
-                "API key not configured. Set api_key in config, or set DEEPSEEK_API_KEY / OPENAI_API_KEY environment variable."
-            );
-        }
         self.mcp = McpClientManager::connect_all(&self.config.mcp).await?;
         Ok(())
     }
@@ -189,7 +184,7 @@ impl<S: RunMode> Agent<S> {
 
 impl Agent<AwakeMode> {
     /// Create Agent for normal startup (cold boot or session resume).
-    pub fn awake(config: Config, debug_tx: Option<tokio::sync::watch::Sender<crate::debug::DebugSnapshot>>) -> Self {
+    pub fn awake(config: Config, debug_tx: Option<tokio::sync::watch::Sender<crate::debug::DebugSnapshot>>) -> anyhow::Result<Self> {
         let memory = Arc::new(MemoryManager::new(&config.memory));
         let skills = {
             let mut reg = SkillRegistry::new(&config.skills.directory);
@@ -209,7 +204,7 @@ impl Agent<AwakeMode> {
             History::new(conversation_path)
         };
 
-        let llm = LlmClient::new(&config.llm);
+        let llm = LlmClient::new(&config.llm)?;
 
         let builtin = awake.permission_rules();
         let approved_path = PathBuf::from(&config.permission.approved_path);
@@ -246,7 +241,7 @@ impl Agent<AwakeMode> {
             agent.history.push(system_msg);
         }
 
-        agent
+        Ok(agent)
     }
 
     pub async fn shutdown(&mut self) {

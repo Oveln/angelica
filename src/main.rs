@@ -5,9 +5,9 @@ use tokio::sync::mpsc;
 #[derive(Parser)]
 #[command(name = "angelica", about = "A ReAct-based AI agent with TUI")]
 struct Cli {
-    /// Config file path
-    #[arg(short, long, default_value = "config.toml")]
-    config: PathBuf,
+    /// Config file path (default: ~/.config/angelica/config.toml)
+    #[arg(short, long)]
+    config: Option<PathBuf>,
     /// Enable debug HTTP server
     #[arg(long)]
     debug: bool,
@@ -28,28 +28,35 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    let current_dir = std::env::current_dir()?;
-
-    let config = if cli.config.exists() {
-        let config_path = if cli.config.is_absolute() {
-            cli.config
-        } else {
-            current_dir.join(&cli.config)
-        };
-        let mut cfg = angelica::config::Config::from_file(&config_path)?;
-        cfg.resolve_paths(config_path.parent().unwrap_or(&current_dir));
-        cfg
-    } else {
-        let mut cfg = angelica::config::Config::default();
-        cfg.resolve_paths(&current_dir);
-        cfg
+    let config = match cli.config {
+        Some(ref path) => {
+            let abs = if path.is_absolute() {
+                path.clone()
+            } else {
+                std::env::current_dir()?.join(path)
+            };
+            let mut cfg = angelica::config::Config::from_file(&abs)?;
+            cfg.resolve_paths();
+            cfg
+        }
+        None => {
+            let xdg_path = angelica::config::xdg_config_path();
+            if xdg_path.exists() {
+                let mut cfg = angelica::config::Config::from_file(&xdg_path)?;
+                cfg.resolve_paths();
+                cfg
+            } else {
+                let mut cfg = angelica::config::Config::default();
+                cfg.resolve_paths();
+                cfg
+            }
+        }
     };
 
     let (app_event_tx, app_event_rx) = mpsc::channel::<angelica::agent::events::AppEvent>(256);
     let (user_action_tx, user_action_rx) =
         mpsc::channel::<angelica::agent::events::UserAction>(256);
 
-    // Ensure data directory is a git repo for history tracking
     {
         let data_dir = config.state.data_dir();
         if let Err(e) = angelica::data_git::ensure_repo(&data_dir) {
@@ -57,7 +64,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Debug HTTP server
     let debug_tx = if cli.debug {
         let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 9914));
         let default_snapshot = angelica::debug::DebugSnapshot::default();
@@ -69,17 +75,17 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let model_name = config.llm.model.clone();
+    let model_name = config.llm.default_model_name().to_string();
     let conversation_path = config.state.conversation_path.clone();
     let config_clone = config;
     let agent_handle = tokio::spawn(async move {
-        angelica::agent::run(config_clone, user_action_rx, app_event_tx, debug_tx).await;
+        angelica::agent::run(config_clone, user_action_rx, app_event_tx, debug_tx).await
     });
 
     angelica::tui::app::run_tui(app_event_rx, user_action_tx, model_name, conversation_path)
         .await?;
 
-    agent_handle.await?;
+    agent_handle.await??;
 
     Ok(())
 }

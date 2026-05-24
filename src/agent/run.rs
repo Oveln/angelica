@@ -9,8 +9,8 @@ pub async fn run(
     mut user_rx: mpsc::Receiver<UserAction>,
     event_tx: mpsc::Sender<AppEvent>,
     debug_tx: Option<tokio::sync::watch::Sender<crate::debug::DebugSnapshot>>,
-) {
-    let mut agent = Agent::<AwakeMode>::awake(config, debug_tx);
+) -> anyhow::Result<()> {
+    let mut agent = Agent::<AwakeMode>::awake(config, debug_tx)?;
 
     if let Err(e) = agent.initialize().await {
         let _ = event_tx
@@ -18,12 +18,14 @@ pub async fn run(
                 message: format!("Initialization failed: {}", e),
             })
             .await;
-        return;
+        return Ok(());
     }
 
     agent.emit_debug_snapshot();
 
     run_loop(agent, &mut user_rx, &event_tx).await;
+
+    Ok(())
 }
 
 async fn run_loop(

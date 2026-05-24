@@ -35,7 +35,7 @@ impl AwakeMode {
         wake_dream: Option<String>,
     ) -> Self {
         let model_patch =
-            crate::llm::patch::ModelPatch::new(&config.llm.model, config.llm.role_immersion);
+            crate::llm::patch::ModelPatch::new(config.llm.default_model_name(), config.llm.role_immersion);
         let prompt_builder = AwakePromptBuilder::new(model_patch);
 
         let history_dir = std::path::PathBuf::from(&config.state.conversation_path)

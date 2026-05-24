@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::llm::types::ChatMessage;
+
 use super::Agent;
 use super::history::History;
 use super::modes::{AwakeMode, RunMode, SleepingMode};
@@ -71,7 +73,15 @@ impl Agent<SleepingMode> {
 
         let data_dir = self.config.state.data_dir();
         let history_folder = data_dir.join("history").join(&snapshot_ts);
-
+        self.history.push(ChatMessage {
+            role: String::from("user"),
+            content: Some(String::from(" ")),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+            usage: None,
+        });
         let _ = event_tx.send(AppEvent::Sleeping).await;
 
         loop {

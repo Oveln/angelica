@@ -1,9 +1,27 @@
+use genai::adapter::AdapterKind;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 
 use crate::permission::PermissionConfig;
+
+const APP_NAME: &str = "angelica";
+
+pub fn xdg_config_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())))
+        .join(APP_NAME)
+}
+
+pub fn xdg_data_dir() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())))
+        .join(APP_NAME)
+}
+
+pub fn xdg_config_path() -> PathBuf {
+    xdg_config_dir().join("config.toml")
+}
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct Config {
@@ -36,15 +54,16 @@ impl Config {
         Ok(toml::from_str(s)?)
     }
 
-    pub fn resolve_paths(&mut self, base: &Path) {
-        self.memory.episodes_path = Self::absolute_or(base, &self.memory.episodes_path);
-        self.memory.self_path = Self::absolute_or(base, &self.memory.self_path);
-        self.memory.profiles_dir = Self::absolute_or(base, &self.memory.profiles_dir);
-        self.memory.notebook_path = Self::absolute_or(base, &self.memory.notebook_path);
-        self.skills.directory = Self::absolute_or(base, &self.skills.directory);
-        self.permission.approved_path = Self::absolute_or(base, &self.permission.approved_path);
-        self.state.path = Self::absolute_or(base, &self.state.path);
-        self.state.conversation_path = Self::absolute_or(base, &self.state.conversation_path);
+    pub fn resolve_paths(&mut self) {
+        let base = xdg_data_dir();
+        self.memory.episodes_path = Self::absolute_or(&base, &self.memory.episodes_path);
+        self.memory.self_path = Self::absolute_or(&base, &self.memory.self_path);
+        self.memory.profiles_dir = Self::absolute_or(&base, &self.memory.profiles_dir);
+        self.memory.notebook_path = Self::absolute_or(&base, &self.memory.notebook_path);
+        self.skills.directory = Self::absolute_or(&base, &self.skills.directory);
+        self.permission.approved_path = Self::absolute_or(&base, &self.permission.approved_path);
+        self.state.path = Self::absolute_or(&base, &self.state.path);
+        self.state.conversation_path = Self::absolute_or(&base, &self.state.conversation_path);
     }
 
     fn absolute_or(base: &Path, path: &str) -> String {
@@ -67,35 +86,18 @@ impl std::str::FromStr for Config {
 
 // ── LLM ──
 
+/// A single LLM provider configuration.
+/// Each provider maps to a `genai::AdapterKind` which handles
+/// endpoint resolution, auth, and protocol differences automatically.
 #[derive(Debug, Deserialize, Clone)]
-pub struct LlmConfig {
-    #[serde(default = "default_model")]
-    pub model: String,
-    #[serde(default = "default_base_url")]
-    pub base_url: String,
-    #[serde(default = "default_max_tokens")]
-    pub max_tokens: u32,
-    #[serde(default = "default_temperature")]
-    pub temperature: f32,
-    #[serde(default = "default_true")]
-    pub thinking: bool,
-    #[serde(default = "default_reasoning_effort")]
-    pub reasoning_effort: String,
-    pub api_key: Option<String>,
-    #[serde(default = "default_max_iterations")]
-    pub max_iterations: u32,
-    #[serde(default)]
-    pub role_immersion: Option<bool>,
-    #[serde(default)]
-    pub profiles: HashMap<String, ProfileConfig>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct ProfileConfig {
+pub struct ProviderConfig {
+    pub name: String,
+    pub adapter: AdapterKind,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub base_url: Option<String>,
+    #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default)]
     pub max_tokens: Option<u32>,
@@ -107,41 +109,44 @@ pub struct ProfileConfig {
     pub reasoning_effort: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct LlmConfig {
+    #[serde(default = "default_max_iterations")]
+    pub max_iterations: u32,
+    #[serde(default)]
+    pub role_immersion: Option<bool>,
+    #[serde(default)]
+    pub providers: Vec<ProviderConfig>,
+    #[serde(default)]
+    pub default_provider: Option<String>,
+}
+
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            model: default_model(),
-            base_url: default_base_url(),
-            max_tokens: default_max_tokens(),
-            temperature: default_temperature(),
-            thinking: true,
-            reasoning_effort: default_reasoning_effort(),
-            api_key: None,
             max_iterations: default_max_iterations(),
             role_immersion: None,
-            profiles: HashMap::new(),
+            providers: Vec::new(),
+            default_provider: None,
         }
     }
 }
 
-fn default_model() -> String {
-    "deepseek-v4-flash".to_string()
+impl LlmConfig {
+    pub fn default_model_name(&self) -> &str {
+        let target_name = self.default_provider.as_deref();
+        for p in &self.providers {
+            if Some(p.name.as_str()) == target_name {
+                return p.model.as_deref().unwrap_or("unknown");
+            }
+        }
+        self.providers
+            .first()
+            .and_then(|p| p.model.as_deref())
+            .unwrap_or("unknown")
+    }
 }
-fn default_base_url() -> String {
-    "https://api.deepseek.com".to_string()
-}
-fn default_max_tokens() -> u32 {
-    4096
-}
-fn default_temperature() -> f32 {
-    0.7
-}
-fn default_reasoning_effort() -> String {
-    "high".to_string()
-}
-fn default_true() -> bool {
-    true
-}
+
 fn default_max_iterations() -> u32 {
     10
 }
@@ -196,16 +201,16 @@ impl Default for MemoryConfig {
 }
 
 fn default_episodes_path() -> String {
-    "data/episodes.jsonl".to_string()
+    "episodes.jsonl".to_string()
 }
 fn default_self_path() -> String {
-    "data/SELF.md".to_string()
+    "SELF.md".to_string()
 }
 fn default_profiles_dir() -> String {
-    "data/profiles".to_string()
+    "profiles".to_string()
 }
 fn default_notebook_path() -> String {
-    "data/notebook.md".to_string()
+    "notebook.md".to_string()
 }
 fn default_max_file_size_kb() -> usize {
     32
@@ -236,8 +241,6 @@ fn default_profile_hard_limit() -> usize {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct EmbeddingConfig {
-    #[serde(default = "default_embed_provider")]
-    pub provider: String,
     #[serde(default = "default_embed_model")]
     pub model: String,
     #[serde(default = "default_embed_base_url")]
@@ -249,7 +252,6 @@ pub struct EmbeddingConfig {
 impl Default for EmbeddingConfig {
     fn default() -> Self {
         Self {
-            provider: default_embed_provider(),
             model: default_embed_model(),
             base_url: default_embed_base_url(),
             api_key_env: String::new(),
@@ -257,9 +259,6 @@ impl Default for EmbeddingConfig {
     }
 }
 
-fn default_embed_provider() -> String {
-    "ollama".to_string()
-}
 fn default_embed_model() -> String {
     "qwen3-embedding".to_string()
 }
@@ -322,12 +321,11 @@ pub struct StateConfig {
 }
 
 impl StateConfig {
-    /// Parent directory of `conversation_path`, i.e. the data root.
     pub fn data_dir(&self) -> PathBuf {
         PathBuf::from(&self.conversation_path)
             .parent()
             .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("data"))
+            .unwrap_or_else(xdg_data_dir)
     }
 }
 
@@ -341,66 +339,14 @@ impl Default for StateConfig {
 }
 
 fn default_state_path() -> String {
-    "data/state.json".to_string()
+    "state.json".to_string()
 }
 fn default_conversation_path() -> String {
-    "data/conversation.jsonl".to_string()
+    "conversation.jsonl".to_string()
 }
 
 // ── Fatigue ──
 
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_default_config() {
-        let config = Config::default();
-        assert_eq!(config.llm.model, "deepseek-v4-flash");
-        assert!(config.llm.thinking);
-        assert_eq!(config.embedding.provider, "ollama");
-        assert_eq!(config.embedding.model, "qwen3-embedding");
-    }
-
-    #[test]
-    fn parse_toml_config() {
-        let toml = r#"
-[llm]
-model = "deepseek-v4-pro"
-base_url = "https://api.deepseek.com"
-max_tokens = 8192
-thinking = false
-
-[memory]
-recent_threshold = 3
-
-[embedding]
-provider = "ollama"
-model = "qwen3-embedding"
-"#;
-        let config = Config::parse_toml(toml).unwrap();
-        assert_eq!(config.llm.model, "deepseek-v4-pro");
-        assert!(!config.llm.thinking);
-        assert_eq!(config.memory.recent_threshold, 3);
-    }
-}
-fn default_max_context_tokens() -> u64 {
-    120_000
-}
-fn default_curve_exponent() -> f64 {
-    1.0
-}
-fn default_sleep_threshold() -> f64 {
-    0.85
-}
-fn default_can_sleep_threshold() -> f64 {
-    0.6
-}
-fn default_groggy_turns() -> u32 {
-    3
-}
 #[derive(Debug, Deserialize, Clone)]
 pub struct FatigueConfig {
     #[serde(default = "default_max_context_tokens")]
@@ -424,5 +370,102 @@ impl Default for FatigueConfig {
             can_sleep_threshold: default_can_sleep_threshold(),
             groggy_turns: default_groggy_turns(),
         }
+    }
+}
+
+fn default_max_context_tokens() -> u64 {
+    120_000
+}
+fn default_curve_exponent() -> f64 {
+    1.0
+}
+fn default_sleep_threshold() -> f64 {
+    0.85
+}
+fn default_can_sleep_threshold() -> f64 {
+    0.6
+}
+fn default_groggy_turns() -> u32 {
+    3
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_default_config() {
+        let config = Config::default();
+        assert!(config.llm.providers.is_empty());
+        assert_eq!(config.embedding.model, "qwen3-embedding");
+    }
+
+    #[test]
+    fn parse_toml_config() {
+        let toml = r#"
+[llm]
+max_iterations = 20
+
+[memory]
+recent_threshold = 3
+
+[[llm.providers]]
+name = "deepseek"
+adapter = "DeepSeek"
+model = "deepseek-v4-pro"
+thinking = false
+max_tokens = 8192
+"#;
+        let config = Config::parse_toml(toml).unwrap();
+        assert_eq!(config.llm.providers.len(), 1);
+        assert!(!config.llm.providers[0].thinking.unwrap());
+        assert_eq!(config.llm.providers[0].max_tokens.unwrap(), 8192);
+        assert_eq!(config.memory.recent_threshold, 3);
+    }
+
+    #[test]
+    fn parse_multi_provider_config() {
+        let toml = r#"
+[[llm.providers]]
+name = "deepseek"
+adapter = "DeepSeek"
+model = "deepseek-v4-flash"
+
+[[llm.providers]]
+name = "openai"
+adapter = "OpenAI"
+model = "gpt-4o"
+
+[[llm.providers]]
+name = "groq"
+adapter = "Groq"
+base_url = "https://api.groq.com/openai/v1"
+model = "llama-3.1-70b-versatile"
+"#;
+        let config = Config::parse_toml(toml).unwrap();
+        assert_eq!(config.llm.providers.len(), 3);
+        assert_eq!(config.llm.providers[0].name, "deepseek");
+        assert_eq!(config.llm.providers[1].name, "openai");
+        assert_eq!(config.llm.providers[2].name, "groq");
+    }
+
+    #[test]
+    fn default_model_name_resolution() {
+        let toml = r#"
+[llm]
+default_provider = "openai"
+
+[[llm.providers]]
+name = "deepseek"
+adapter = "DeepSeek"
+model = "deepseek-v4-flash"
+
+[[llm.providers]]
+name = "openai"
+adapter = "OpenAI"
+model = "gpt-4o"
+"#;
+        let config = Config::parse_toml(toml).unwrap();
+        assert_eq!(config.llm.default_model_name(), "gpt-4o");
     }
 }

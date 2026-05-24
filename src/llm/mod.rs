@@ -3,6 +3,7 @@ pub mod types;
 
 use futures::StreamExt;
 use genai::Client;
+use genai::adapter::AdapterKind;
 use genai::chat::{
     ChatMessage as GenaiMessage, ChatOptions, ChatRequest, ChatStreamEvent, ContentPart,
     MessageContent, ReasoningEffort, StreamChunk, Tool as GenaiTool, ToolCall as GenaiToolCall,
@@ -12,17 +13,11 @@ use genai::resolver::{AuthData, AuthResolver, Endpoint, ServiceTargetResolver};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::config::{LlmConfig, ProfileConfig};
+use crate::config::{LlmConfig, ProviderConfig};
 use crate::llm::types::*;
 use crate::usage::UsageMetrics;
 
-pub struct LlmClient {
-    clients: HashMap<String, Arc<Client>>,
-    profiles: HashMap<String, ResolvedProfile>,
-    default: ResolvedProfile,
-    configured: bool,
-}
-
+/// Resolved profile: a concrete set of parameters for a single LLM provider.
 #[derive(Clone)]
 struct ResolvedProfile {
     model: String,
@@ -30,77 +25,80 @@ struct ResolvedProfile {
     temperature: f32,
     max_tokens: u32,
     reasoning_effort: String,
-    client_key: String,
+    adapter_kind: AdapterKind,
+    provider_name: String,
+}
+
+pub struct LlmClient {
+    /// Map from provider name to its genai Client.
+    clients: HashMap<String, Arc<Client>>,
+    /// Map from provider name to its resolved profile.
+    profiles: HashMap<String, ResolvedProfile>,
+    /// Default profile (first provider, or the named default_provider).
+    default: ResolvedProfile,
 }
 
 impl LlmClient {
-    pub fn new(config: &LlmConfig) -> Self {
-        let default_api_key = config
-            .api_key
-            .clone()
-            .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok())
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-            .unwrap_or_default();
-
-        let configured = !default_api_key.is_empty();
-
+    pub fn new(config: &LlmConfig) -> anyhow::Result<Self> {
         let mut clients = HashMap::new();
         let mut profiles = HashMap::new();
 
-        let default_key = make_client_key(&config.base_url, &default_api_key);
-        clients.insert(
-            default_key.clone(),
-            build_client(&config.base_url, &default_api_key),
-        );
+        // Build clients from configured providers.
+        if !config.providers.is_empty() {
+            for pc in &config.providers {
+                let api_key = resolve_api_key(pc);
+                let model = pc.model.clone().unwrap_or_else(|| "deepseek-v4-flash".to_string());
 
-        let default_profile = ResolvedProfile {
-            model: config.model.clone(),
-            thinking: config.thinking,
-            temperature: config.temperature,
-            max_tokens: config.max_tokens,
-            reasoning_effort: config.reasoning_effort.clone(),
-            client_key: default_key.clone(),
-        };
+                if !clients.contains_key(&pc.name) {
+                    let client = build_client(
+                        &pc.adapter,
+                        &api_key,
+                        pc.base_url.as_deref(),
+                    );
+                    clients.insert(pc.name.clone(), client);
+                }
 
-        for (name, pc) in &config.profiles {
-            let base_url = pc
-                .base_url
-                .as_deref()
-                .unwrap_or(&config.base_url)
-                .to_string();
-            let api_key = resolve_api_key(pc, &default_api_key);
-            let key = make_client_key(&base_url, &api_key);
-
-            if !clients.contains_key(&key) {
-                clients.insert(key.clone(), build_client(&base_url, &api_key));
+                profiles.insert(
+                    pc.name.clone(),
+                    ResolvedProfile {
+                        model,
+                        thinking: pc.thinking.unwrap_or(true),
+                        temperature: pc.temperature.unwrap_or(0.7),
+                        max_tokens: pc.max_tokens.unwrap_or(4096),
+                        reasoning_effort: pc.reasoning_effort.clone().unwrap_or_else(|| "high".to_string()),
+                        adapter_kind: pc.adapter,
+                        provider_name: pc.name.clone(),
+                    },
+                );
             }
+        }
 
-            profiles.insert(
-                name.clone(),
-                ResolvedProfile {
-                    model: pc.model.clone().unwrap_or_else(|| config.model.clone()),
-                    thinking: pc.thinking.unwrap_or(config.thinking),
-                    temperature: pc.temperature.unwrap_or(config.temperature),
-                    max_tokens: pc.max_tokens.unwrap_or(config.max_tokens),
-                    reasoning_effort: pc
-                        .reasoning_effort
-                        .clone()
-                        .unwrap_or_else(|| config.reasoning_effort.clone()),
-                    client_key: key,
-                },
+        // Select default profile: explicit default_provider > first provider.
+        if profiles.is_empty() {
+            anyhow::bail!(
+                "No [[llm.providers]] configured. \
+                 Please add at least one provider to config.toml."
             );
         }
 
-        Self {
+        let first_name = config.providers[0].name.clone();
+        let default_name = config.default_provider.as_deref().unwrap_or(&first_name);
+        let profile = match profiles.get(default_name) {
+            Some(p) => p,
+            None => {
+                tracing::warn!(
+                    "default_provider '{}' not found, using first provider", default_name
+                );
+                profiles.get(&first_name).expect("first profile exists")
+            }
+        };
+        let default_profile = profile.clone();
+
+        Ok(Self {
             clients,
             profiles,
             default: default_profile,
-            configured,
-        }
-    }
-
-    pub fn is_configured(&self) -> bool {
-        self.configured
+        })
     }
 
     pub async fn complete(
@@ -109,7 +107,7 @@ impl LlmClient {
         options: RequestOptions,
     ) -> anyhow::Result<LlmResponse> {
         let profile = self.resolve_profile(options.profile.as_deref());
-        let client = self.clients.get(&profile.client_key).unwrap();
+        let client = self.clients.get(&profile.provider_name).unwrap();
         let genai_messages = convert_messages(messages)?;
 
         let mut chat_req = ChatRequest::new(genai_messages);
@@ -168,7 +166,7 @@ impl LlmClient {
         tokio::sync::mpsc::Receiver<LlmStreamEvent>,
     )> {
         let profile = self.resolve_profile(options.profile.as_deref()).clone();
-        let client = self.clients.get(&profile.client_key).unwrap().clone(); // Arc clone
+        let client = self.clients.get(&profile.provider_name).unwrap().clone();
         let genai_messages = convert_messages(messages)?;
         let tools = options.tools.clone();
 
@@ -278,35 +276,50 @@ impl LlmClient {
     }
 }
 
-fn build_client(base_url: &str, api_key: &str) -> Arc<Client> {
+/// Build a genai Client for a specific adapter.
+/// If `base_url` is provided, it overrides the adapter's default endpoint.
+fn build_client(
+    adapter: &AdapterKind,
+    api_key: &str,
+    base_url: Option<&str>,
+) -> Arc<Client> {
     let key = api_key.to_string();
-    let base: Arc<str> = base_url.into();
+    let owned_base_url = base_url.map(|s| s.to_string());
 
-    Client::builder()
+    let mut builder = Client::builder()
+        .with_adapter_kind(*adapter)
         .with_auth_resolver(AuthResolver::from_resolver_fn(move |_kind| {
             Ok(Some(AuthData::from_single(key.clone())))
-        }))
-        .with_service_target_resolver(ServiceTargetResolver::from_resolver_fn(
-            move |mut target: genai::ServiceTarget| {
-                target.endpoint = Endpoint::from_owned(base.clone());
-                Ok(target)
-            },
-        ))
-        .build()
-        .into()
+        }));
+
+    if let Some(url) = owned_base_url {
+        builder = builder.with_service_target_resolver(
+            ServiceTargetResolver::from_resolver_fn(
+                move |mut target: genai::ServiceTarget| {
+                    target.endpoint = Endpoint::from_owned(url.clone());
+                    Ok(target)
+                },
+            ),
+        );
+    }
+
+    builder.build().into()
 }
 
-fn make_client_key(base_url: &str, api_key: &str) -> String {
-    format!("{}:{}", base_url, api_key)
-}
-
-fn resolve_api_key(profile: &ProfileConfig, default: &str) -> String {
-    profile
-        .api_key
+/// Resolve the API key for a provider: direct key > env var > empty.
+fn resolve_api_key(pc: &ProviderConfig) -> String {
+    pc.api_key
         .clone()
-        .unwrap_or_else(|| default.to_string())
+        .or_else(|| {
+            pc.adapter
+                .default_key_env_name()
+                .and_then(|env| std::env::var(env).ok())
+        })
+        .unwrap_or_default()
 }
 
+
+/// Build ChatOptions, respecting provider-specific parameter requirements.
 fn build_chat_options(
     profile: &ResolvedProfile,
     temperature_override: Option<f32>,
@@ -326,16 +339,23 @@ fn build_chat_options(
         .with_capture_tool_calls(true);
 
     if thinking {
-        let effort = match reasoning_effort_override.unwrap_or(&profile.reasoning_effort) {
-            "low" => ReasoningEffort::Low,
-            "medium" => ReasoningEffort::Medium,
-            _ => ReasoningEffort::High,
-        };
-        opts = opts.with_reasoning_effort(effort);
+        // Only DeepSeek supports reasoning_effort in ChatOptions.
+        // Other providers (OpenAI, Groq, etc.) ignore it or handle it differently.
+        if profile.adapter_kind == AdapterKind::DeepSeek {
+            let effort = match reasoning_effort_override.unwrap_or(&profile.reasoning_effort) {
+                "low" => ReasoningEffort::Low,
+                "medium" => ReasoningEffort::Medium,
+                _ => ReasoningEffort::High,
+            };
+            opts = opts.with_reasoning_effort(effort);
+        }
     } else {
-        opts = opts
-            .with_temperature(temperature as f64)
-            .with_extra_body(serde_json::json!({ "thinking": { "type": "disabled" } }));
+        // Only DeepSeek needs the "thinking: disabled" extra_body.
+        // Other providers don't understand this parameter.
+        if profile.adapter_kind == AdapterKind::DeepSeek {
+            opts = opts.with_extra_body(serde_json::json!({ "thinking": { "type": "disabled" } }));
+        }
+        opts = opts.with_temperature(temperature as f64);
     }
 
     opts
