@@ -1,5 +1,5 @@
 use genai::adapter::AdapterKind;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -7,23 +7,20 @@ use crate::permission::PermissionConfig;
 
 const APP_NAME: &str = "angelica";
 
-pub fn xdg_config_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())))
-        .join(APP_NAME)
-}
-
-pub fn xdg_data_dir() -> PathBuf {
+fn data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())))
         .join(APP_NAME)
 }
 
-pub fn xdg_config_path() -> PathBuf {
-    xdg_config_dir().join("config.toml")
+pub fn config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())))
+        .join(APP_NAME)
+        .join("config.toml")
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Config {
     #[serde(default)]
     pub llm: LlmConfig,
@@ -55,7 +52,7 @@ impl Config {
     }
 
     pub fn resolve_paths(&mut self) {
-        let base = xdg_data_dir();
+        let base = data_dir();
         self.memory.episodes_path = Self::absolute_or(&base, &self.memory.episodes_path);
         self.memory.self_path = Self::absolute_or(&base, &self.memory.self_path);
         self.memory.profiles_dir = Self::absolute_or(&base, &self.memory.profiles_dir);
@@ -89,7 +86,7 @@ impl std::str::FromStr for Config {
 /// A single LLM provider configuration.
 /// Each provider maps to a `genai::AdapterKind` which handles
 /// endpoint resolution, auth, and protocol differences automatically.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ProviderConfig {
     pub name: String,
     pub adapter: AdapterKind,
@@ -109,16 +106,30 @@ pub struct ProviderConfig {
     pub reasoning_effort: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u32,
     #[serde(default)]
     pub role_immersion: Option<bool>,
-    #[serde(default)]
+    #[serde(default = "default_providers")]
     pub providers: Vec<ProviderConfig>,
     #[serde(default)]
     pub default_provider: Option<String>,
+}
+
+fn default_providers() -> Vec<ProviderConfig> {
+    vec![ProviderConfig {
+        name: "deepseek".to_string(),
+        adapter: AdapterKind::DeepSeek,
+        model: Some("deepseek-v4-flash".to_string()),
+        base_url: None,
+        api_key: None,
+        max_tokens: None,
+        temperature: None,
+        thinking: None,
+        reasoning_effort: None,
+    }]
 }
 
 impl Default for LlmConfig {
@@ -126,7 +137,7 @@ impl Default for LlmConfig {
         Self {
             max_iterations: default_max_iterations(),
             role_immersion: None,
-            providers: Vec::new(),
+            providers: default_providers(),
             default_provider: None,
         }
     }
@@ -153,7 +164,7 @@ fn default_max_iterations() -> u32 {
 
 // ── Memory ──
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryConfig {
     #[serde(default = "default_episodes_path")]
     pub episodes_path: String,
@@ -239,7 +250,7 @@ fn default_profile_hard_limit() -> usize {
 
 // ── Embedding ──
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingConfig {
     #[serde(default = "default_embed_model")]
     pub model: String,
@@ -268,13 +279,13 @@ fn default_embed_base_url() -> String {
 
 // ── MCP ──
 
-#[derive(Debug, Deserialize, Default, Clone)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct McpConfig {
     #[serde(default)]
     pub servers: std::collections::HashMap<String, McpServerConfig>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct McpServerConfig {
     #[serde(default = "default_stdio")]
     pub transport: String,
@@ -292,7 +303,7 @@ fn default_stdio() -> String {
 
 // ── Skills ──
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SkillsConfig {
     #[serde(default = "default_skills_dir")]
     pub directory: String,
@@ -312,7 +323,7 @@ fn default_skills_dir() -> String {
 
 // ── State ──
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StateConfig {
     #[serde(default = "default_state_path")]
     pub path: String,
@@ -325,7 +336,7 @@ impl StateConfig {
         PathBuf::from(&self.conversation_path)
             .parent()
             .map(|p| p.to_path_buf())
-            .unwrap_or_else(xdg_data_dir)
+            .unwrap_or_else(data_dir)
     }
 }
 
@@ -347,7 +358,7 @@ fn default_conversation_path() -> String {
 
 // ── Fatigue ──
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FatigueConfig {
     #[serde(default = "default_max_context_tokens")]
     pub max_context_tokens: u64,
@@ -396,7 +407,8 @@ mod tests {
     #[test]
     fn parse_default_config() {
         let config = Config::default();
-        assert!(config.llm.providers.is_empty());
+        assert_eq!(config.llm.providers.len(), 1);
+        assert_eq!(config.llm.providers[0].name, "deepseek");
         assert_eq!(config.embedding.model, "qwen3-embedding");
     }
 

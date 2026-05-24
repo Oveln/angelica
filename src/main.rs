@@ -40,13 +40,18 @@ async fn main() -> anyhow::Result<()> {
             cfg
         }
         None => {
-            let xdg_path = angelica::config::xdg_config_path();
-            if xdg_path.exists() {
-                let mut cfg = angelica::config::Config::from_file(&xdg_path)?;
+            let config_path = angelica::config::config_path();
+            if config_path.exists() {
+                let mut cfg = angelica::config::Config::from_file(&config_path)?;
                 cfg.resolve_paths();
                 cfg
             } else {
+                if let Some(parent) = config_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
                 let mut cfg = angelica::config::Config::default();
+                std::fs::write(&config_path, toml::to_string_pretty(&cfg)?)?;
+                tracing::info!("Created default config at {}", config_path.display());
                 cfg.resolve_paths();
                 cfg
             }

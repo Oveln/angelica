@@ -35,14 +35,14 @@ struct ApprovedRules {
     rules: Vec<Rule>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ToolRuleEntry {
     pub tool: String,
     pub target: String,
     pub action: PermissionAction,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PermissionConfig {
     #[serde(default = "PermissionAction::default_ask")]
     pub default: PermissionAction,
