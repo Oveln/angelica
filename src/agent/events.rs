@@ -71,5 +71,6 @@ pub enum UserAction {
         feedback: Option<String>,
     },
     ForceSleep,
+    RebuildEmbeddings,
     Quit,
 }

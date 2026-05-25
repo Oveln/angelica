@@ -1,43 +1,72 @@
+mod client;
+mod transport;
+
 use std::collections::HashMap;
 
+use anyhow::Result;
+use serde_json::Value;
+
+use crate::config::McpConfig;
 use crate::llm::types::ToolSpec;
 
+/// Manages connections to all configured MCP servers.
 pub struct McpClientManager {
-    tool_to_server: HashMap<String, String>,
-    tool_specs: Vec<ToolSpec>,
+    clients: HashMap<String, client::McpClient>,
 }
 
 impl McpClientManager {
     pub fn new() -> Self {
         Self {
-            tool_to_server: HashMap::new(),
-            tool_specs: Vec::new(),
+            clients: HashMap::new(),
         }
     }
 
-    pub async fn connect_all(_config: &crate::config::McpConfig) -> anyhow::Result<Self> {
-        Ok(Self::new())
+    /// Connect to all configured MCP servers.
+    pub async fn connect_all(config: &McpConfig) -> Result<Self> {
+        let mut clients = HashMap::new();
+
+        for (name, server_config) in &config.servers {
+            match client::McpClient::connect(name, server_config).await {
+                Ok(client) => {
+                    clients.insert(name.clone(), client);
+                }
+                Err(e) => {
+                    tracing::warn!("MCP server '{}' failed to connect: {}", name, e);
+                }
+            }
+        }
+
+        Ok(Self { clients })
     }
 
-    pub fn tool_specs(&self) -> &[ToolSpec] {
-        &self.tool_specs
+    /// Aggregate tool specs from all connected servers.
+    pub fn tool_specs(&self) -> Vec<ToolSpec> {
+        let mut specs = Vec::new();
+        for client in self.clients.values() {
+            specs.extend(client.tool_specs());
+        }
+        specs
     }
 
+    /// Call a tool on the server that owns it.
     pub async fn call_tool(
-        &self,
+        &mut self,
         name: &str,
-        _arguments: serde_json::Value,
-    ) -> anyhow::Result<String> {
-        if self.tool_to_server.contains_key(name) {
-            Ok(format!("MCP tool '{}' called (not yet implemented)", name))
-        } else {
-            Err(anyhow::anyhow!("MCP tool '{}' not found", name))
+        arguments: Value,
+    ) -> Result<String> {
+        for client in self.clients.values_mut() {
+            if client.has_tool(name) {
+                return client.call_tool(name, arguments).await;
+            }
         }
+        Err(anyhow::anyhow!("MCP tool '{}' not found on any server", name))
     }
 
+    /// Shut down all connections.
     pub async fn disconnect_all(&mut self) {
-        self.tool_to_server.clear();
-        self.tool_specs.clear();
+        for (_, mut client) in self.clients.drain() {
+            client.shutdown().await;
+        }
     }
 }
 

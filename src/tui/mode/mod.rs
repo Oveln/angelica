@@ -157,6 +157,9 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
                 state.add_chat("system", "Falling asleep...", None);
                 let _ = tx.send(UserAction::ForceSleep).await;
             }
+            "rebuild-embeddings" | "rebuild" => {
+                let _ = tx.send(UserAction::RebuildEmbeddings).await;
+            }
             "usage" | "stats" => {
                 let sessions = crate::usage::load_session_summaries(&state.usage_stats_path);
                 state.cached_usage_sessions = Some(sessions);

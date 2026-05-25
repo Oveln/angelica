@@ -6,6 +6,10 @@ impl<S: RunMode> Agent<S> {
     /// After a turn completes, compute embedding from user input + assistant response
     /// and search past episodes. Store results + top score for probabilistic injection.
     pub(super) async fn recall_past_episodes(&mut self, assistant_content: Option<&str>) {
+        if !self.config.embedding.enabled {
+            return;
+        }
+
         let budget = self.config.memory.episode_inject_budget;
         if budget == 0 {
             return;
@@ -47,5 +51,33 @@ impl<S: RunMode> Agent<S> {
                 tracing::debug!("Embedding search skipped: {}", e);
             }
         }
+    }
+
+    pub async fn rebuild_embeddings(&self) -> anyhow::Result<usize> {
+        if !self.config.embedding.enabled {
+            anyhow::bail!("Embedding is disabled in config");
+        }
+
+        let mut episodes = self.memory.read_episodes();
+        let mut count: usize = 0;
+        for ep in &mut episodes {
+            if ep.status != crate::episode::EpisodeStatus::Past {
+                continue;
+            }
+            match embedding::embed(&self.config.embedding, &ep.body).await {
+                Ok(vec) => {
+                    ep.embedding = vec;
+                    count += 1;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to embed episode {}: {}", ep.id, e);
+                }
+            }
+        }
+
+        if count > 0 {
+            self.memory.write_all_episodes(&episodes)?;
+        }
+        Ok(count)
     }
 }

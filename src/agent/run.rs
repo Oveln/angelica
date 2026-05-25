@@ -54,6 +54,23 @@ async fn run_loop(
                 let sleeping = agent.transition_to_sleeping(snapshot_ts.clone());
                 agent = sleeping.run_sleep_cycle(event_tx, snapshot_ts).await;
             }
+            UserAction::RebuildEmbeddings => {
+                let _ = event_tx.send(AppEvent::TextDelta {
+                    delta: "Rebuilding embeddings...\n".to_string(),
+                }).await;
+                match agent.rebuild_embeddings().await {
+                    Ok(count) => {
+                        let _ = event_tx.send(AppEvent::TextDone {
+                            full_text: format!("Rebuilt {} episode embedding(s).", count),
+                        }).await;
+                    }
+                    Err(e) => {
+                        let _ = event_tx.send(AppEvent::Error {
+                            message: format!("Rebuild failed: {}", e),
+                        }).await;
+                    }
+                }
+            }
             UserAction::ApprovePending => {
                 let _ = agent.approve_and_step(event_tx).await;
                 agent.save_if_dirty().await;

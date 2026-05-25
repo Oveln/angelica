@@ -252,6 +252,8 @@ fn default_profile_hard_limit() -> usize {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     #[serde(default = "default_embed_model")]
     pub model: String,
     #[serde(default = "default_embed_base_url")]
@@ -263,6 +265,7 @@ pub struct EmbeddingConfig {
 impl Default for EmbeddingConfig {
     fn default() -> Self {
         Self {
+            enabled: default_true(),
             model: default_embed_model(),
             base_url: default_embed_base_url(),
             api_key_env: String::new(),
@@ -272,6 +275,9 @@ impl Default for EmbeddingConfig {
 
 fn default_embed_model() -> String {
     "qwen3-embedding".to_string()
+}
+fn default_true() -> bool {
+    true
 }
 fn default_embed_base_url() -> String {
     "http://localhost:11434".to_string()

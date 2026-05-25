@@ -13,7 +13,7 @@ pub(super) enum ProcessOutcome {
 }
 
 impl<S: RunMode> Agent<S> {
-    async fn execute_tool(&self, name: &str, args: serde_json::Value) -> String {
+    async fn execute_tool(&mut self, name: &str, args: serde_json::Value) -> String {
         if let Some(tool) = self.run_state.get_tool(name) {
             match tool.execute(args).await {
                 Ok(result) => result,

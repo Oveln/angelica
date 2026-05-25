@@ -71,6 +71,11 @@ pub static BUILTIN_COMMANDS: &[SlashCommand] = &[
         description: "Put angelica to sleep (dream & recharge)",
     },
     SlashCommand {
+        name: "rebuild-embeddings",
+        aliases: &["rebuild"],
+        description: "Rebuild episode embeddings with current model",
+    },
+    SlashCommand {
         name: "usage",
         aliases: &["stats"],
         description: "Show token usage statistics",

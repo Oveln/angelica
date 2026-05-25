@@ -112,7 +112,7 @@ impl<S: RunMode> Agent<S> {
 
     fn all_tool_specs(&self) -> Vec<crate::llm::types::ToolSpec> {
         let mut specs = self.run_state.tool_specs();
-        specs.extend_from_slice(self.mcp.tool_specs());
+        specs.extend(self.mcp.tool_specs());
         specs
     }
 
