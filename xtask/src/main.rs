@@ -21,15 +21,15 @@ fn main() {
             run(&mut c);
         }
         "gui" => {
-            let tauri_dir = project_root().join("angelica-gui").join("src-tauri");
-            if !tauri_dir.exists() {
-                eprintln!("error: {} not found", tauri_dir.display());
+            let gui_dir = project_root().join("angelica-gui");
+            if !gui_dir.join("src-tauri").exists() {
+                eprintln!("error: {} not found", gui_dir.join("src-tauri").display());
                 exit(1);
             }
             let mut c = Command::new("cargo");
             c.args(["tauri", "dev"]);
-            c.current_dir(&tauri_dir);
-            run(&mut c);
+            c.current_dir(&gui_dir);
+            run_gui(&mut c);
         }
         "-h" | "--help" | "help" => {
             println!("angelica xtask — unified dev entry point\n");
@@ -67,5 +67,14 @@ fn run(c: &mut Command) {
     let status = c.status().expect("failed to execute command");
     if !status.success() {
         exit(status.code().unwrap_or(1));
+    }
+}
+
+fn run_gui(c: &mut Command) {
+    let status = c.stdin(std::process::Stdio::null()).status().expect("failed to execute command");
+    let code = status.code().unwrap_or(1);
+    let _ = Command::new("stty").arg("sane").stdin(std::process::Stdio::inherit()).status();
+    if !status.success() {
+        exit(code);
     }
 }

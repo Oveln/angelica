@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "identifier": "com.angelica.app",
   "build": {
-    "frontendDist": "../../frontend/dist",
+    "frontendDist": "../frontend/dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "bun run --cwd ../frontend dev",
     "beforeBuildCommand": "bun run --cwd ../frontend build"
