@@ -1,6 +1,7 @@
 use clap::Parser;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
+use tracing_subscriber::prelude::*;
 
 #[derive(Parser)]
 #[command(name = "angelica", about = "A ReAct-based AI agent with TUI")]
@@ -11,22 +12,54 @@ struct Cli {
     /// Enable debug HTTP server
     #[arg(long)]
     debug: bool,
+    /// Log level: trace, debug, info, warn, error (overrides RUST_LOG)
+    #[arg(long)]
+    log_level: Option<String>,
+}
+
+fn init_logging(log_level: Option<&str>) {
+    let env_filter = match log_level {
+        Some(level) => tracing_subscriber::EnvFilter::new(level),
+        None => tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+    };
+
+    let log_dir = dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("angelica");
+
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "angelica-tui.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .with_level(true)
+        .with_target(false)
+        .with_line_number(false)
+        .with_filter(env_filter.clone());
+
+    let stderr_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_ansi(true)
+        .with_level(true)
+        .with_target(false)
+        .with_line_number(false)
+        .with_filter(env_filter);
+
+    tracing_subscriber::registry()
+        .with(file_layer)
+        .with(stderr_layer)
+        .init();
+
+    // Leak the guard so the non-blocking writer stays alive.
+    std::mem::forget(_guard);
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let log_file = std::fs::File::create("angelica.log").ok();
-    let builder = tracing_subscriber::fmt().with_env_filter(
-        tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-    );
-    if let Some(file) = log_file {
-        builder.with_writer(file).with_ansi(false).init();
-    } else {
-        builder.init();
-    }
-
     let cli = Cli::parse();
+    init_logging(cli.log_level.as_deref());
 
     let config = angelica::config::Config::load_or_create(cli.config)?;
 

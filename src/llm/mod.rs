@@ -104,6 +104,10 @@ impl LlmClient {
         })
     }
 
+    #[tracing::instrument(skip(self, messages, options), fields(
+        messages = messages.len(),
+        tools = options.tools.len(),
+    ))]
     pub async fn complete(
         &self,
         messages: &[ChatMessage],
@@ -160,6 +164,10 @@ impl LlmClient {
         })
     }
 
+    #[tracing::instrument(skip(self, messages, options), fields(
+        messages = messages.len(),
+        tools = options.tools.len(),
+    ))]
     pub async fn stream(
         &self,
         messages: &[ChatMessage],
@@ -192,6 +200,15 @@ impl LlmClient {
         );
 
         let (tx, rx) = tokio::sync::mpsc::channel(512);
+
+        let model_for_log = profile.model.clone();
+        let provider_for_log = profile.provider_name.clone();
+        tracing::info!(
+            model = %model_for_log,
+            provider = %provider_for_log,
+            thinking = profile.thinking,
+            "starting llm stream"
+        );
 
         let handle = tokio::spawn(async move {
             let stream_response = client

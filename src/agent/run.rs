@@ -5,6 +5,10 @@ use super::events::{AppEvent, UserAction};
 use crate::agent::modes::AwakeMode;
 use crate::usage::{self, restore_current_usage};
 
+#[tracing::instrument(skip(config, user_rx, event_tx, debug_tx), fields(
+    model = %config.llm.default_model_name(),
+    data_dir = %config.state.data_dir().display(),
+))]
 pub async fn run(
     config: crate::config::Config,
     mut user_rx: mpsc::Receiver<UserAction>,
@@ -12,6 +16,12 @@ pub async fn run(
     debug_tx: Option<tokio::sync::watch::Sender<crate::debug::DebugSnapshot>>,
 ) -> anyhow::Result<()> {
     let mut agent = Agent::<AwakeMode>::awake(config, debug_tx)?;
+
+    tracing::info!(
+        history_messages = agent.history.messages().len(),
+        debug_enabled = agent.debug_tx.is_some(),
+        "agent initialized"
+    );
 
     let entries = agent.history.to_display_entries();
     let model_name = agent.config.llm.default_model_name().to_string();
@@ -37,11 +47,14 @@ pub async fn run(
 
     agent.emit_debug_snapshot();
 
+    tracing::info!("entering agent main loop");
     run_loop(agent, &mut user_rx, &event_tx, usage_stats_path, model_name).await;
 
+    tracing::info!("agent run complete");
     Ok(())
 }
 
+#[tracing::instrument(skip(agent, user_rx, event_tx))]
 async fn run_loop(
     mut agent: Agent<AwakeMode>,
     user_rx: &mut mpsc::Receiver<UserAction>,
@@ -49,15 +62,24 @@ async fn run_loop(
     usage_stats_path: std::path::PathBuf,
     model_name: String,
 ) {
+    let mut action_count: u64 = 0;
     while let Some(action) = user_rx.recv().await {
+        action_count += 1;
+        tracing::debug!(action = ?action, seq = action_count, "received user action");
         match action {
             UserAction::SendMessage { content } => {
+                tracing::info!(
+                    content_len = content.len(),
+                    msg_preview = %crate::agent::truncate_str(&content, 80),
+                    "user message received"
+                );
                 agent.push_user_message(&content);
                 agent.reset_iteration();
                 let _ = agent.step(event_tx).await;
                 agent.save_if_dirty().await;
 
                 if agent.should_sleep() {
+                    tracing::info!("fatigue threshold reached, transitioning to sleep");
                     let _ = event_tx.send(AppEvent::FallingAsleep).await;
                     let snapshot_ts = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
                     let sleeping = agent.transition_to_sleeping(snapshot_ts.clone());
@@ -65,12 +87,14 @@ async fn run_loop(
                 }
             }
             UserAction::ForceSleep => {
+                tracing::info!("forced sleep requested");
                 let _ = event_tx.send(AppEvent::FallingAsleep).await;
                 let snapshot_ts = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
                 let sleeping = agent.transition_to_sleeping(snapshot_ts.clone());
                 agent = sleeping.run_sleep_cycle(event_tx, snapshot_ts).await;
             }
             UserAction::RebuildEmbeddings => {
+                tracing::info!("rebuilding embeddings requested");
                 let _ = event_tx
                     .send(AppEvent::TextDelta {
                         delta: "Rebuilding embeddings...\n".to_string(),
@@ -78,6 +102,7 @@ async fn run_loop(
                     .await;
                 match agent.rebuild_embeddings().await {
                     Ok(count) => {
+                        tracing::info!(count, "embeddings rebuilt");
                         let _ = event_tx
                             .send(AppEvent::TextDone {
                                 full_text: format!("Rebuilt {} episode embedding(s).", count),
@@ -134,6 +159,7 @@ async fn run_loop(
                     .await;
             }
             UserAction::Quit => {
+                tracing::info!(action_count, "agent shutting down");
                 break;
             }
         }

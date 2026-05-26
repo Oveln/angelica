@@ -7,9 +7,11 @@ use super::history::History;
 use super::modes::{AwakeMode, RunMode, SleepingMode};
 
 impl Agent<AwakeMode> {
-    /// Transition into sleeping mode. Consumes self, returns Agent<SleepingMode>.
-    /// Archives conversation, creates sleep history, resets per-turn state.
+    #[tracing::instrument(skip(self), fields(
+        history_messages = self.history.messages().len(),
+    ))]
     pub fn transition_to_sleeping(self, snapshot_ts: String) -> Agent<SleepingMode> {
+        tracing::info!(snapshot_ts = %snapshot_ts, "transitioning to sleeping mode");
         self.save_state();
 
         let data_dir = self.config.state.data_dir();
@@ -62,14 +64,16 @@ impl Agent<AwakeMode> {
 }
 
 impl Agent<SleepingMode> {
+    #[tracing::instrument(skip(self, event_tx), fields(snapshot_ts))]
     pub async fn run_sleep_cycle(
         mut self,
         event_tx: &tokio::sync::mpsc::Sender<crate::agent::events::AppEvent>,
         snapshot_ts: String,
     ) -> Agent<AwakeMode> {
         use crate::agent::events::AppEvent;
-
         use crate::sleep::consolidation;
+
+        tracing::info!("beginning sleep cycle");
 
         let data_dir = self.config.state.data_dir();
         let history_folder = data_dir.join("history").join(&snapshot_ts);
@@ -91,11 +95,14 @@ impl Agent<SleepingMode> {
         }
 
         let embed_config = &self.config.embedding;
+        tracing::info!("sleep phase 2a: transition and embed");
         let transitioned =
             consolidation::phase_transition_and_embed(&self.memory, embed_config).await;
 
+        tracing::info!("sleep phase 2b: consolidate");
         consolidation::phase_consolidate(&self.memory, &self.llm, &transitioned).await;
 
+        tracing::info!("sleep phase 3: compress");
         consolidation::phase_compress(&self.memory, &self.llm).await;
 
         let dream = self.run_state.take_dream();
@@ -134,7 +141,10 @@ impl Agent<SleepingMode> {
         }
 
         if let Some(d) = dream_for_event {
+            tracing::info!(dream_len = d.len(), "agent waking up with dream");
             let _ = event_tx.send(AppEvent::WakingUp { dream: d }).await;
+        } else {
+            tracing::info!("agent waking up without dream");
         }
         if let Some(evt) = awake.run_state.fatigue_update_event() {
             let _ = event_tx.try_send(evt);

@@ -1,3 +1,4 @@
+use axum::Json;
 use axum::Router;
 use axum::extract::State;
 use axum::response::Html;
@@ -23,6 +24,7 @@ pub fn start_debug_server(addr: std::net::SocketAddr, snapshot_rx: watch::Receiv
         .route("/", get(handler_index))
         .route("/context", get(handler_context))
         .route("/context.txt", get(handler_context_text))
+        .route("/api/snapshot.json", get(handler_snapshot_json))
         .route("/state", get(handler_state))
         .route("/episodes", get(handler_episodes))
         .layer(CorsLayer::permissive())
@@ -363,7 +365,6 @@ async fn handler_state(State(state): State<Arc<DebugState>>) -> Html<String> {
 async fn handler_episodes(State(state): State<Arc<DebugState>>) -> Html<String> {
     let snap = borrow_snapshot(&state);
 
-    // Episodes are not in the snapshot yet — show a placeholder with link to data
     Html(format!(
         r#"<!DOCTYPE html>
 <html><head>
@@ -380,6 +381,10 @@ async fn handler_episodes(State(state): State<Arc<DebugState>>) -> Html<String> 
         nav = nav_html(),
         msgs = snap.history_messages,
     ))
+}
+
+async fn handler_snapshot_json(State(state): State<Arc<DebugState>>) -> Json<DebugSnapshot> {
+    Json(borrow_snapshot(&state))
 }
 
 fn html_escape(s: &str) -> String {

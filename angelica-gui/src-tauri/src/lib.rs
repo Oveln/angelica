@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 use tokio::sync::mpsc;
+use tracing_subscriber::prelude::*;
 
 use angelica::agent::events::{AppEvent, UserAction};
 use angelica::config::Config;
@@ -93,6 +94,7 @@ pub struct AppState {
 
 pub fn run() {
     init_logging();
+    tracing::info!("angelica-gui starting");
 
     let config = match Config::load_or_create(None) {
         Ok(cfg) => cfg,
@@ -136,18 +138,21 @@ pub fn run() {
                 tracing::info!("Event bridge started");
                 while let Some(event) = app_event_rx.recv().await {
                     let (event_name, payload) = serialize_event(&event);
-                    tracing::debug!("Emitting: {}", event_name);
+                    tracing::debug!(
+                        event = %event_name,
+                        payload_size = serde_json::to_string(&payload).map_or(0, |s| s.len()),
+                        "emitting event to frontend"
+                    );
                     let _ = app_handle.emit(event_name, payload);
                 }
                 tracing::info!("Event bridge ended");
             });
 
             tauri::async_runtime::spawn(async move {
-                tracing::info!("Agent started");
-                if let Err(e) =
-                    angelica::agent::run(config, user_action_rx, app_event_tx, None).await
-                {
-                    tracing::error!("Agent error: {}", e);
+                tracing::info!("Agent starting");
+                match angelica::agent::run(config, user_action_rx, app_event_tx, None).await {
+                    Ok(()) => tracing::info!("Agent exited normally"),
+                    Err(e) => tracing::error!("Agent error: {}", e),
                 }
             });
 
@@ -169,26 +174,38 @@ pub fn run() {
 }
 
 fn init_logging() {
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
     let log_dir = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("angelica");
 
-    let log_path = log_dir.join("angelica-gui.log");
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "angelica-gui.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
-    let file = std::fs::create_dir_all(&log_dir)
-        .ok()
-        .and_then(|_| std::fs::File::create(&log_path).ok());
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .with_level(true)
+        .with_target(false)
+        .with_line_number(false)
+        .with_filter(env_filter.clone());
 
-    let builder = tracing_subscriber::fmt().with_env_filter(
-        tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-    );
+    let stderr_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_ansi(true)
+        .with_level(true)
+        .with_target(false)
+        .with_line_number(false)
+        .with_filter(env_filter);
 
-    if let Some(f) = file {
-        builder.with_writer(f).with_ansi(false).init();
-    } else {
-        builder.init();
-    }
+    tracing_subscriber::registry()
+        .with(file_layer)
+        .with(stderr_layer)
+        .init();
+
+    std::mem::forget(_guard);
 }
 
 fn show_fatal_dialog(message: &str) {

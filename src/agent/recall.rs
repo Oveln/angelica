@@ -4,8 +4,7 @@ use crate::embedding;
 use crate::llm::types::Role;
 
 impl<S: RunMode> Agent<S> {
-    /// After a turn completes, compute embedding from user input + assistant response
-    /// and search past episodes. Store results + top score for probabilistic injection.
+    #[tracing::instrument(skip(self))]
     pub(super) async fn recall_past_episodes(&mut self, assistant_content: Option<&str>) {
         if !self.config.embedding.enabled {
             return;

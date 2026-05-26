@@ -139,7 +139,9 @@ impl<S: RunMode> Agent<S> {
     }
 
     pub async fn initialize(&mut self) -> anyhow::Result<()> {
+        tracing::info!("connecting MCP clients");
         self.mcp = McpClientManager::connect_all(&self.config.mcp).await?;
+        tracing::info!("initialization complete");
         Ok(())
     }
 
@@ -179,6 +181,7 @@ impl<S: RunMode> Agent<S> {
 
 impl Agent<AwakeMode> {
     /// Create Agent for normal startup (cold boot or session resume).
+    #[tracing::instrument(skip(config, debug_tx))]
     pub fn awake(
         config: Config,
         debug_tx: Option<tokio::sync::watch::Sender<crate::debug::DebugSnapshot>>,
@@ -243,8 +246,10 @@ impl Agent<AwakeMode> {
     }
 
     pub async fn shutdown(&mut self) {
+        tracing::info!("shutting down agent");
         self.save_state();
         self.mcp.disconnect_all().await;
+        tracing::info!("shutdown complete");
     }
 
     pub fn should_sleep(&self) -> bool {
@@ -252,6 +257,11 @@ impl Agent<AwakeMode> {
     }
 
     pub fn push_user_message(&mut self, content: &str) {
+        tracing::debug!(
+            content_len = content.len(),
+            history_len = self.history.messages().len(),
+            "pushing user message"
+        );
         let context = self.build_context();
 
         let mut msg = crate::llm::types::ChatMessage::user_with_context(content, context);
@@ -309,6 +319,7 @@ impl Agent<AwakeMode> {
 
     pub async fn save_if_dirty(&mut self) {
         if self.dirty {
+            tracing::debug!("saving state (dirty)");
             self.save_state();
             self.dirty = false;
         }

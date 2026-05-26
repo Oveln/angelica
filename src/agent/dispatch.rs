@@ -13,17 +13,37 @@ pub(super) enum ProcessOutcome {
 }
 
 impl<S: RunMode> Agent<S> {
+    #[tracing::instrument(skip(self), fields(tool = name))]
     async fn execute_tool(&mut self, name: &str, args: serde_json::Value) -> String {
+        let args_preview = crate::agent::truncate_str(
+            &serde_json::to_string(&args).unwrap_or_default(),
+            200,
+        );
+        tracing::debug!(args = %args_preview, "executing tool");
         if let Some(tool) = self.run_state.get_tool(name) {
-            match tool.execute(args).await {
-                Ok(result) => result,
-                Err(e) => format!("Error: {}", e),
+            let result = tool.execute(args).await;
+            match &result {
+                Ok(r) => tracing::debug!(
+                    tool = name,
+                    result_len = r.len(),
+                    result_preview = %crate::agent::truncate_str(r, 120),
+                    "tool executed successfully"
+                ),
+                Err(e) => tracing::warn!(tool = name, error = %e, "tool execution failed"),
             }
+            result.unwrap_or_else(|e| format!("Error: {}", e))
         } else {
-            match self.mcp.call_tool(name, args).await {
-                Ok(result) => result,
-                Err(e) => format!("Error: {}", e),
+            tracing::debug!(tool = name, "delegating to MCP");
+            let result = self.mcp.call_tool(name, args).await;
+            match &result {
+                Ok(r) => tracing::debug!(
+                    tool = name,
+                    result_len = r.len(),
+                    "mcp tool executed successfully"
+                ),
+                Err(e) => tracing::warn!(tool = name, error = %e, "mcp tool execution failed"),
             }
+            result.unwrap_or_else(|e| format!("Error: {}", e))
         }
     }
 
@@ -73,6 +93,7 @@ impl<S: RunMode> Agent<S> {
         }
     }
 
+    #[tracing::instrument(skip(self, group, event_tx))]
     pub(super) async fn process_one_group(
         &mut self,
         group: ToolCallGroup,
@@ -86,6 +107,10 @@ impl<S: RunMode> Agent<S> {
         }
     }
 
+    #[tracing::instrument(skip(self, tc, event_tx), fields(
+        tool = %tc.function.name,
+        call_id = %tc.id,
+    ))]
     async fn process_single_call(
         &mut self,
         tc: ToolCall,
@@ -95,7 +120,7 @@ impl<S: RunMode> Agent<S> {
         let name = tc.function.name.clone();
         let tc_id = tc.id.clone();
 
-        tracing::debug!(tool = name, call_id = tc_id, "processing tool call");
+        tracing::debug!(args = %tc.function.arguments, "processing tool call");
 
         let args: serde_json::Value = match serde_json::from_str(&tc.function.arguments) {
             Ok(v) => v,
@@ -189,6 +214,10 @@ impl<S: RunMode> Agent<S> {
         }
     }
 
+    #[tracing::instrument(skip(self, edits, event_tx), fields(
+        path = %path,
+        count = edits.len(),
+    ))]
     async fn process_batched_edits(
         &mut self,
         path: String,
@@ -197,12 +226,7 @@ impl<S: RunMode> Agent<S> {
     ) -> ProcessOutcome {
         let stream_to_tui = self.run_state.stream_to_tui();
 
-        tracing::debug!(
-            tool = "edit_file",
-            path,
-            count = edits.len(),
-            "processing batched tool calls"
-        );
+        tracing::debug!("processing batched tool calls");
 
         let action =
             self.evaluate_permission("edit_file", Some(&path), Some("edit_file (batched)"));
@@ -330,6 +354,11 @@ impl<S: RunMode> Agent<S> {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(
+        tool = name,
+        target = target.unwrap_or(""),
+        label = label.unwrap_or(name),
+    ))]
     fn evaluate_permission(
         &self,
         name: &str,
@@ -341,9 +370,9 @@ impl<S: RunMode> Agent<S> {
         }
 
         let display_name = label.unwrap_or(name);
-        tracing::info!("evaluate: tool={}, target={:?}", display_name, target);
+        tracing::debug!(tool = display_name, target = ?target, "evaluating permission");
         let action = self.permissions.evaluate(name, target);
-        tracing::info!("evaluate result: {:?}", action);
+        tracing::debug!(tool = display_name, action = ?action, "permission evaluation result");
         action
     }
 
@@ -380,10 +409,14 @@ impl<S: RunMode> Agent<S> {
         format!("[{}]\nArguments: {}", name, args)
     }
 
+    #[tracing::instrument(skip(self, event_tx))]
     pub async fn approve_pending(&mut self, event_tx: &mpsc::Sender<AppEvent>) -> bool {
         let pending = match self.pending_approval.take() {
             Some(p) => p,
-            None => return false,
+            None => {
+                tracing::warn!("approve_pending called with no pending approval");
+                return false;
+            }
         };
 
         let stream_to_tui = self.run_state.stream_to_tui();
@@ -391,6 +424,12 @@ impl<S: RunMode> Agent<S> {
         let tool_name = pending.tool_name().to_string();
         let display_args = pending.display_args().to_string();
         let preview = pending.preview().map(String::from);
+
+        tracing::info!(
+            tool = %tool_name,
+            call_ids = ?tc_ids,
+            "executing approved tool"
+        );
 
         if stream_to_tui {
             for tc_id in &tc_ids {
@@ -439,6 +478,7 @@ impl<S: RunMode> Agent<S> {
         true
     }
 
+    #[tracing::instrument(skip(self, event_tx), fields(feedback))]
     pub async fn reject_pending(
         &mut self,
         feedback: &str,
@@ -446,8 +486,16 @@ impl<S: RunMode> Agent<S> {
     ) -> bool {
         let pending = match self.pending_approval.take() {
             Some(p) => p,
-            None => return false,
+            None => {
+                tracing::warn!("reject_pending called with no pending approval");
+                return false;
+            }
         };
+        tracing::info!(
+            tool = %pending.tool_name(),
+            feedback = %feedback,
+            "tool rejected by user"
+        );
         let msg = if feedback.is_empty() {
             "User rejected this operation.".to_string()
         } else {

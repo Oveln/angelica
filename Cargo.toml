@@ -33,7 +33,7 @@ chrono = "0.4"
 ts-rs = { version = "12", features = ["serde-compat"] }
 
 # Logging
-tracing = "0.1"
+tracing = { version = "0.1", features = ["attributes"] }
 
 # Async trait
 async-trait = "0.1"

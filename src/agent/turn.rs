@@ -42,6 +42,10 @@ impl<S: RunMode> Agent<S> {
         let _ = tx.send(snapshot);
     }
 
+    #[tracing::instrument(skip(self, event_tx), fields(
+        mode = self.run_state.mode_name(),
+        iteration = self.iteration,
+    ))]
     pub(super) async fn next_llm_response(
         &self,
         event_tx: &mpsc::Sender<AppEvent>,
@@ -50,10 +54,13 @@ impl<S: RunMode> Agent<S> {
         self.emit_debug_snapshot();
         let messages = self.build_turn_messages();
         let tools = self.all_tool_specs();
-        tracing::debug!(
+        let total_chars: usize = messages.iter().filter_map(|m| m.content.as_ref()).map(|c| c.len()).sum();
+        let est_tokens = total_chars / 4;
+        tracing::info!(
             messages = messages.len(),
             tools = tools.len(),
-            iteration = self.iteration,
+            total_chars,
+            est_tokens,
             "requesting llm turn"
         );
 
@@ -74,9 +81,15 @@ impl<S: RunMode> Agent<S> {
 
         match handle.await {
             Ok(Ok(response)) => {
-                tracing::debug!(
+                let prompt_tokens = response.usage.map(|u| u.prompt_tokens).unwrap_or(0);
+                let completion_tokens = response.usage.map(|u| u.completion_tokens).unwrap_or(0);
+                tracing::info!(
                     has_content = response.content.is_some(),
+                    content_len = response.content.as_ref().map_or(0, String::len),
                     tool_calls = response.tool_calls.as_ref().map_or(0, Vec::len),
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens = prompt_tokens + completion_tokens,
                     "received llm turn"
                 );
                 self.record_usage(event_tx, response.usage, messages.len())
