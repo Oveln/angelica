@@ -112,10 +112,6 @@ export function quit(): Promise<void> {
   return invoke('quit');
 }
 
-export function getInitMessages(): Promise<InitMessage[] | null> {
-  return invoke('get_init_messages');
-}
-
 // --- Typed event listener ---
 
 export function onAppEvent<K extends keyof AppEventMap>(

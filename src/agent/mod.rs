@@ -302,11 +302,7 @@ impl Agent<AwakeMode> {
             recall,
         };
 
-        if ctx.turns == 0 && ctx.fatigue.is_none() && !ctx.has_dream && ctx.recall.is_none() {
-            None
-        } else {
-            Some(ctx)
-        }
+        Some(ctx)
     }
 
     pub async fn save_if_dirty(&mut self) {

@@ -6,7 +6,6 @@
     approvePending,
     approveAlways,
     rejectTool,
-    getInitMessages,
     type ApprovalPending as ApprovalPayload,
     type ToolCalling,
     type ToolResult,
@@ -36,16 +35,6 @@
   let initLoaded = $state(false);
 
   onMount(async () => {
-    // Try polling first (handles race where Init was emitted before listener registered)
-    try {
-      const cached = await getInitMessages();
-      if (cached && cached.length > 0) {
-        messages = convertHistoryToMessages(cached);
-        initLoaded = true;
-      }
-    } catch (_) { /* ignore */ }
-
-    // Fallback listener for cases where Init arrives after mount
     unsubs.push(await onAppEvent('init', (p: InitEvent) => {
       if (!initLoaded) {
         messages = convertHistoryToMessages(p.messages);

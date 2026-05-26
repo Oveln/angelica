@@ -69,15 +69,6 @@ async fn quit(state: tauri::State<'_, AppState>) -> Result<(), String> {
 
 pub struct AppState {
     pub user_tx: Mutex<mpsc::Sender<UserAction>>,
-    pub init_messages: Mutex<Option<Vec<serde_json::Value>>>,
-}
-
-#[tauri::command]
-async fn get_init_messages(
-    state: tauri::State<'_, AppState>,
-) -> Result<Option<Vec<serde_json::Value>>, String> {
-    let mut guard = state.init_messages.lock().map_err(|e| e.to_string())?;
-    Ok(guard.take())
 }
 
 pub fn run() {
@@ -103,10 +94,12 @@ pub fn run() {
         }
     }
 
+    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    let rt_handle = rt.handle().clone();
+
     tracing::info!("Starting agent thread...");
     let agent_config = config;
     let agent_handle = std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         rt.block_on(async {
             if let Err(e) =
                 angelica::agent::run(agent_config, user_action_rx, app_event_tx, None).await
@@ -120,7 +113,6 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(AppState {
             user_tx: Mutex::new(user_action_tx),
-            init_messages: Mutex::new(None),
         })
         .setup(move |app| {
             let app_handle = app.handle().clone();
@@ -136,22 +128,11 @@ pub fn run() {
                 });
             }
 
+            let rt = rt_handle;
             std::thread::spawn(move || {
-                let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
                 rt.block_on(async {
                     tracing::info!("Event bridge started");
                     while let Some(event) = app_event_rx.recv().await {
-                        if let AppEvent::Init { messages } = &event {
-                            if let Some(state) = app_handle.try_state::<AppState>() {
-                                if let Ok(mut guard) = state.init_messages.lock() {
-                                    let raw: Vec<serde_json::Value> = messages
-                                        .iter()
-                                        .filter_map(|m| serde_json::to_value(m).ok())
-                                        .collect();
-                                    *guard = Some(raw);
-                                }
-                            }
-                        }
                         let (event_name, payload) = serialize_event(&event);
                         tracing::debug!("Emitting: {}", event_name);
                         let _ = app_handle.emit(event_name, payload);
@@ -168,7 +149,6 @@ pub fn run() {
             reject_tool,
             force_sleep,
             quit,
-            get_init_messages,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
