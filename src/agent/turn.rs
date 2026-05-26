@@ -100,9 +100,7 @@ impl<S: RunMode> Agent<S> {
         }
 
         let history = self.history.messages();
-        let has_system = history
-            .iter()
-            .any(|m| m.role == Role::System);
+        let has_system = history.iter().any(|m| m.role == Role::System);
         let mut messages = Vec::with_capacity(history.len() + usize::from(!has_system));
 
         if !has_system {

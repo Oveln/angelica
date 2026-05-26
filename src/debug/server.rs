@@ -17,10 +17,7 @@ pub struct DebugState {
 
 // ── Server startup ────────────────────────────────────────────
 
-pub fn start_debug_server(
-    addr: std::net::SocketAddr,
-    snapshot_rx: watch::Receiver<DebugSnapshot>,
-) {
+pub fn start_debug_server(addr: std::net::SocketAddr, snapshot_rx: watch::Receiver<DebugSnapshot>) {
     let state = DebugState { snapshot_rx };
     let app = Router::new()
         .route("/", get(handler_index))
@@ -249,8 +246,14 @@ async fn handler_index(State(state): State<Arc<DebugState>>) -> Html<String> {
         tool_count = snap.tool_count,
         recall = snap.recall_top_score,
         recall_preview = html_escape(&snap.recall_text_preview),
-        prompt_tok = snap.last_prompt_tokens.map(|v| v.to_string()).unwrap_or("-".into()),
-        comp_tok = snap.last_completion_tokens.map(|v| v.to_string()).unwrap_or("-".into()),
+        prompt_tok = snap
+            .last_prompt_tokens
+            .map(|v| v.to_string())
+            .unwrap_or("-".into()),
+        comp_tok = snap
+            .last_completion_tokens
+            .map(|v| v.to_string())
+            .unwrap_or("-".into()),
         total_chars = total_chars,
         total_est_tokens = total_est_tokens,
     ))
@@ -330,9 +333,7 @@ async fn handler_context_text(State(state): State<Arc<DebugState>>) -> String {
     for msg in &snap.context_messages {
         out.push_str(&format!(
             "═══ {} ({} chars) ═══\n{}\n\n",
-            msg.role,
-            msg.content_length,
-            msg.content_preview
+            msg.role, msg.content_length, msg.content_preview
         ));
     }
     out

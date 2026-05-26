@@ -493,8 +493,13 @@ fn extract_diff_preview(preview: &str) -> Option<String> {
 }
 
 fn is_diff_line(l: &str) -> bool {
-    l.starts_with(' ') || l.starts_with('+') || l.starts_with('-') || l.starts_with('@')
-        || l.starts_with("diff ") || l.starts_with("---") || l.starts_with("+++")
+    l.starts_with(' ')
+        || l.starts_with('+')
+        || l.starts_with('-')
+        || l.starts_with('@')
+        || l.starts_with("diff ")
+        || l.starts_with("---")
+        || l.starts_with("+++")
 }
 
 #[cfg(test)]

@@ -1,10 +1,10 @@
 use tokio::sync::mpsc;
 
 use super::Agent;
+use super::dispatch::ProcessOutcome;
 use super::events::AppEvent;
 use super::group::group_tool_calls;
 use super::modes::RunMode;
-use super::dispatch::ProcessOutcome;
 use crate::llm::LlmResponse;
 
 impl<S: RunMode> Agent<S> {

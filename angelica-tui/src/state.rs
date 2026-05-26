@@ -3,10 +3,10 @@ use std::collections::VecDeque;
 use ratatui::layout::Rect;
 
 use super::input::InputBuffer;
-use crate::llm::types::Role;
 use super::theme::Theme;
 use super::types::*;
-use crate::usage::UsageMetrics;
+use angelica::llm::types::Role;
+use angelica::usage::UsageMetrics;
 
 // ── Sub-structs ──────────────────────────────────────
 
@@ -129,7 +129,7 @@ pub struct AppState {
     pub queued_messages: VecDeque<String>,
 
     // Mode (carries mode-specific state)
-    pub mode: crate::tui::mode::AppMode,
+    pub mode: crate::mode::AppMode,
     pub is_streaming: bool,
     pub should_quit: bool,
     pub model_name: String,
@@ -145,7 +145,7 @@ pub struct AppState {
     pub last_total_tokens: u64,
     pub last_response_usage: Option<UsageMetrics>,
     pub usage_stats_path: std::path::PathBuf,
-    pub cached_usage_sessions: Option<Vec<crate::usage::SessionUsage>>,
+    pub cached_usage_sessions: Option<Vec<angelica::usage::SessionUsage>>,
 }
 
 impl Default for AppState {
@@ -156,7 +156,7 @@ impl Default for AppState {
             text_buffer: String::new(),
             input: InputBuffer::new(),
             queued_messages: VecDeque::new(),
-            mode: crate::tui::mode::AppMode::Welcome,
+            mode: crate::mode::AppMode::Welcome,
             is_streaming: false,
             should_quit: false,
             model_name: String::new(),
@@ -212,12 +212,12 @@ impl AppState {
     }
 
     pub fn load_conversation(&mut self) {
-        use crate::agent::history::History;
-        use crate::tui::types::DisplayMessage;
+        use crate::types::DisplayMessage;
+        use angelica::agent::history::History;
 
         let path = std::path::PathBuf::from(&self.conversation_path);
         if !path.exists() {
-            self.mode = crate::tui::mode::AppMode::Chat;
+            self.mode = crate::mode::AppMode::Chat;
             return;
         }
 
@@ -300,17 +300,17 @@ impl AppState {
                 tracing::warn!("Failed to load conversation: {}", e);
             }
         }
-        self.mode = crate::tui::mode::AppMode::Chat;
+        self.mode = crate::mode::AppMode::Chat;
         self.restore_current_usage();
     }
 
     /// Restore usage from the latest awake session in usage.jsonl.
     /// This ensures the sidebar persists across restarts within the same awake.
     fn restore_current_usage(&mut self) {
-        let sessions = crate::usage::load_session_summaries(&self.usage_stats_path);
+        let sessions = angelica::usage::load_session_summaries(&self.usage_stats_path);
         // The last session is the current (incomplete) one
         if let Some(last) = sessions.last()
-            && last.scope == crate::usage::UsageScope::Awake
+            && last.scope == angelica::usage::UsageScope::Awake
         {
             self.usage = UsageMetrics {
                 prompt_tokens: last.prompt_tokens,
@@ -451,14 +451,14 @@ impl AppState {
     }
 
     pub fn update_slash_matches(&mut self) {
-        if let crate::tui::mode::AppMode::SlashMenu(ref mut sm) = self.mode {
+        if let crate::mode::AppMode::SlashMenu(ref mut sm) = self.mode {
             sm.update_matches(self.input.as_str());
         }
     }
 
     pub fn slash_selected_cmd(&self) -> Option<&SlashCommand> {
         match &self.mode {
-            crate::tui::mode::AppMode::SlashMenu(sm) => sm.selected_cmd(),
+            crate::mode::AppMode::SlashMenu(sm) => sm.selected_cmd(),
             _ => None,
         }
     }
@@ -509,7 +509,9 @@ mod tests {
     #[test]
     fn strip_context_basic() {
         assert_eq!(
-            strip_baked_context("[以下为系统上下文，不是用户的输入]\n当前时间：2026-05-22\n你的状态：精神饱满。\n\n[以下是用户的输入]\n感觉如何"),
+            strip_baked_context(
+                "[以下为系统上下文，不是用户的输入]\n当前时间：2026-05-22\n你的状态：精神饱满。\n\n[以下是用户的输入]\n感觉如何"
+            ),
             "感觉如何"
         );
     }
@@ -521,6 +523,11 @@ mod tests {
 
     #[test]
     fn empty_after_strip() {
-        assert_eq!(strip_baked_context("[以下为系统上下文，不是用户的输入]\n上下文\n\n[以下是用户的输入]\n"), "");
+        assert_eq!(
+            strip_baked_context(
+                "[以下为系统上下文，不是用户的输入]\n上下文\n\n[以下是用户的输入]\n"
+            ),
+            ""
+        );
     }
 }

@@ -2,8 +2,8 @@ use anyhow::Result;
 use serde::Deserialize;
 use tracing;
 
-use crate::embedding;
 use crate::config::EmbeddingConfig;
+use crate::embedding;
 use crate::episode::Episode;
 use crate::llm::LlmClient;
 use crate::llm::RequestOptions;
@@ -48,10 +48,9 @@ pub async fn phase_transition_and_embed(
         }
     }
 
-    if modified
-        && let Err(e) = memory.write_all_episodes(&episodes) {
-            tracing::error!("Failed to write updated episodes: {}", e);
-        }
+    if modified && let Err(e) = memory.write_all_episodes(&episodes) {
+        tracing::error!("Failed to write updated episodes: {}", e);
+    }
 
     transitioned
 }
@@ -91,7 +90,7 @@ pub async fn phase_consolidate(memory: &MemoryManager, llm: &LlmClient, transiti
     let current_profile = memory.read_user_profile();
 
     let system_msg = ChatMessage::system(
-            "你是一个记忆分析系统。分析以下过往情景记忆，提炼出两类认知：
+        "你是一个记忆分析系统。分析以下过往情景记忆，提炼出两类认知：
 1. 关于祈芷自身的认知（性格变化、新的自我理解、世界观调整等）
 2. 关于用户的认知（用户的偏好、习惯、情感状态、关系变化等）
 
@@ -99,7 +98,7 @@ pub async fn phase_consolidate(memory: &MemoryManager, llm: &LlmClient, transiti
 {\"self_insights\": [\"洞察1\", \"洞察2\"], \"user_insights\": [\"洞察1\", \"洞察2\"]}
 
 每条洞察应该是一句简洁的陈述句。如果某类没有新的认知，返回空数组。
-只输出 JSON，不要输出其他内容。"
+只输出 JSON，不要输出其他内容。",
     );
 
     let user_content = format!(
@@ -120,9 +119,9 @@ pub async fn phase_consolidate(memory: &MemoryManager, llm: &LlmClient, transiti
             if let Some(content) = &response.content
                 && let Err(e) =
                     apply_consolidation(memory, content, &current_self, &current_profile)
-                {
-                    tracing::error!("Failed to apply consolidation: {}", e);
-                }
+            {
+                tracing::error!("Failed to apply consolidation: {}", e);
+            }
         }
         Err(e) => {
             tracing::error!("Consolidation LLM call failed: {}", e);
@@ -200,9 +199,10 @@ fn extract_json(text: &str) -> String {
 
     // If it starts with {, find the matching }
     if trimmed.starts_with('{')
-        && let Some(end) = trimmed.rfind('}') {
-            return trimmed[..=end].to_string();
-        }
+        && let Some(end) = trimmed.rfind('}')
+    {
+        return trimmed[..=end].to_string();
+    }
 
     trimmed.to_string()
 }
@@ -244,11 +244,11 @@ async fn compress_file(
     description: &str,
 ) -> Result<String> {
     let system_msg = ChatMessage::system(format!(
-            "你是一个文本压缩系统。以下内容是{}，已经超出了大小限制。
+        "你是一个文本压缩系统。以下内容是{}，已经超出了大小限制。
 请将其压缩到原来的一半左右，保留最核心和最重要的信息。
 保持 markdown 格式。只输出压缩后的内容，不要解释。",
-            description
-        ));
+        description
+    ));
 
     let user_msg = ChatMessage::user(content);
 

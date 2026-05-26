@@ -47,14 +47,13 @@ impl LlmClient {
         if !config.providers.is_empty() {
             for pc in &config.providers {
                 let api_key = resolve_api_key(pc);
-                let model = pc.model.clone().unwrap_or_else(|| "deepseek-v4-flash".to_string());
+                let model = pc
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| "deepseek-v4-flash".to_string());
 
                 if !clients.contains_key(&pc.name) {
-                    let client = build_client(
-                        &pc.adapter,
-                        &api_key,
-                        pc.base_url.as_deref(),
-                    );
+                    let client = build_client(&pc.adapter, &api_key, pc.base_url.as_deref());
                     clients.insert(pc.name.clone(), client);
                 }
 
@@ -65,7 +64,10 @@ impl LlmClient {
                         thinking: pc.thinking.unwrap_or(true),
                         temperature: pc.temperature.unwrap_or(0.7),
                         max_tokens: pc.max_tokens.unwrap_or(4096),
-                        reasoning_effort: pc.reasoning_effort.clone().unwrap_or_else(|| "high".to_string()),
+                        reasoning_effort: pc
+                            .reasoning_effort
+                            .clone()
+                            .unwrap_or_else(|| "high".to_string()),
                         adapter_kind: pc.adapter,
                         provider_name: pc.name.clone(),
                     },
@@ -87,7 +89,8 @@ impl LlmClient {
             Some(p) => p,
             None => {
                 tracing::warn!(
-                    "default_provider '{}' not found, using first provider", default_name
+                    "default_provider '{}' not found, using first provider",
+                    default_name
                 );
                 profiles.get(&first_name).expect("first profile exists")
             }
@@ -278,11 +281,7 @@ impl LlmClient {
 
 /// Build a genai Client for a specific adapter.
 /// If `base_url` is provided, it overrides the adapter's default endpoint.
-fn build_client(
-    adapter: &AdapterKind,
-    api_key: &str,
-    base_url: Option<&str>,
-) -> Arc<Client> {
+fn build_client(adapter: &AdapterKind, api_key: &str, base_url: Option<&str>) -> Arc<Client> {
     let key = api_key.to_string();
     let owned_base_url = base_url.map(|s| s.to_string());
 
@@ -293,14 +292,12 @@ fn build_client(
         }));
 
     if let Some(url) = owned_base_url {
-        builder = builder.with_service_target_resolver(
-            ServiceTargetResolver::from_resolver_fn(
-                move |mut target: genai::ServiceTarget| {
-                    target.endpoint = Endpoint::from_owned(url.clone());
-                    Ok(target)
-                },
-            ),
-        );
+        builder = builder.with_service_target_resolver(ServiceTargetResolver::from_resolver_fn(
+            move |mut target: genai::ServiceTarget| {
+                target.endpoint = Endpoint::from_owned(url.clone());
+                Ok(target)
+            },
+        ));
     }
 
     builder.build().into()
@@ -317,7 +314,6 @@ fn resolve_api_key(pc: &ProviderConfig) -> String {
         })
         .unwrap_or_default()
 }
-
 
 /// Build ChatOptions, respecting provider-specific parameter requirements.
 fn build_chat_options(

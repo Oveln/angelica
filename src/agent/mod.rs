@@ -44,14 +44,14 @@
 // The generic Agent<S: RunMode> holds all shared resources; S holds mode-specific state.
 // Transition methods consume self and return the new type, enforced at compile time.
 
+mod dispatch;
 pub mod events;
-pub mod step;
 pub mod group;
 pub mod history;
 pub mod modes;
 mod recall;
 pub mod run;
-mod dispatch;
+pub mod step;
 mod transition;
 mod turn;
 
@@ -116,7 +116,6 @@ impl<S: RunMode> Agent<S> {
         specs
     }
 
-
     pub fn reset_iteration(&mut self) {
         self.iteration = 0;
         self.tool_queue.clear();
@@ -152,11 +151,7 @@ impl<S: RunMode> Agent<S> {
 
     /// Reconstruct Agent with a new run mode. Consumes self, replaces
     /// run_state/history/permissions, and resets all per-turn state.
-    fn into_mode<N: RunMode>(
-        self,
-        new_state: N,
-        new_history: History,
-    ) -> Agent<N> {
+    fn into_mode<N: RunMode>(self, new_state: N, new_history: History) -> Agent<N> {
         let mut permissions = self.permissions;
         permissions.set_mode_rules(new_state.permission_rules());
         Agent {
@@ -184,7 +179,10 @@ impl<S: RunMode> Agent<S> {
 
 impl Agent<AwakeMode> {
     /// Create Agent for normal startup (cold boot or session resume).
-    pub fn awake(config: Config, debug_tx: Option<tokio::sync::watch::Sender<crate::debug::DebugSnapshot>>) -> anyhow::Result<Self> {
+    pub fn awake(
+        config: Config,
+        debug_tx: Option<tokio::sync::watch::Sender<crate::debug::DebugSnapshot>>,
+    ) -> anyhow::Result<Self> {
         let memory = Arc::new(MemoryManager::new(&config.memory));
         let skills = {
             let mut reg = SkillRegistry::new(&config.skills.directory);
@@ -271,7 +269,11 @@ impl Agent<AwakeMode> {
 
         let fatigue = {
             let d = self.run_state.fatigue_desc();
-            if d.is_empty() { None } else { Some(d.to_string()) }
+            if d.is_empty() {
+                None
+            } else {
+                Some(d.to_string())
+            }
         };
 
         let (turns, tool_calls, _) = self.run_state.fatigue_info();
@@ -315,7 +317,6 @@ impl Agent<AwakeMode> {
     fn save_state(&self) {
         self.run_state.save_state(&self.config);
     }
-
 }
 
 pub use run::run;

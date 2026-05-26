@@ -19,7 +19,6 @@ pub struct AwakeMode {
     state: AgentState,
 }
 
-
 impl AwakeMode {
     /// Create AwakeMode for normal startup. Loads persisted state if available,
     /// otherwise starts fresh with `on_wake()`.
@@ -27,15 +26,16 @@ impl AwakeMode {
         Self::build(config, memory, skills, None)
     }
 
-
     pub(crate) fn build(
         config: &Config,
         memory: Arc<MemoryManager>,
         skills: Arc<SkillRegistry>,
         wake_dream: Option<String>,
     ) -> Self {
-        let model_patch =
-            crate::llm::patch::ModelPatch::new(config.llm.default_model_name(), config.llm.role_immersion);
+        let model_patch = crate::llm::patch::ModelPatch::new(
+            config.llm.default_model_name(),
+            config.llm.role_immersion,
+        );
         let prompt_builder = AwakePromptBuilder::new(model_patch);
 
         let history_dir = std::path::PathBuf::from(&config.state.conversation_path)
@@ -163,9 +163,19 @@ impl RunMode for AwakeMode {
         true
     }
 
-    fn mode_name(&self) -> &'static str { "awake" }
-    fn fatigue_value(&self) -> f64 { self.state.fatigue.fatigue() }
-    fn fatigue_desc(&self) -> &'static str { self.state.fatigue.describe() }
-    fn turns(&self) -> u32 { self.state.fatigue.turns() }
-    fn tool_calls_count(&self) -> u32 { self.state.fatigue.tool_calls() }
+    fn mode_name(&self) -> &'static str {
+        "awake"
+    }
+    fn fatigue_value(&self) -> f64 {
+        self.state.fatigue.fatigue()
+    }
+    fn fatigue_desc(&self) -> &'static str {
+        self.state.fatigue.describe()
+    }
+    fn turns(&self) -> u32 {
+        self.state.fatigue.turns()
+    }
+    fn tool_calls_count(&self) -> u32 {
+        self.state.fatigue.tool_calls()
+    }
 }

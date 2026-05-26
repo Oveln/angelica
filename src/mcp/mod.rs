@@ -49,17 +49,16 @@ impl McpClientManager {
     }
 
     /// Call a tool on the server that owns it.
-    pub async fn call_tool(
-        &mut self,
-        name: &str,
-        arguments: Value,
-    ) -> Result<String> {
+    pub async fn call_tool(&mut self, name: &str, arguments: Value) -> Result<String> {
         for client in self.clients.values_mut() {
             if client.has_tool(name) {
                 return client.call_tool(name, arguments).await;
             }
         }
-        Err(anyhow::anyhow!("MCP tool '{}' not found on any server", name))
+        Err(anyhow::anyhow!(
+            "MCP tool '{}' not found on any server",
+            name
+        ))
     }
 
     /// Shut down all connections.

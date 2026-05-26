@@ -10,7 +10,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
-use crate::tui::theme::{CARD_BOT, CARD_MID, CARD_TOP, RAIL, Theme};
+use crate::theme::{CARD_BOT, CARD_MID, CARD_TOP, RAIL, Theme};
 
 // ─── Spacing ─────────────────────────────────────────
 
@@ -136,7 +136,7 @@ pub fn glyph_lines(
 /// Uses Unicode arrows for a small visual footprint:
 ///   ↓5.2k  ↑1.2k  ◎0.8k  ⚡85%
 pub fn usage_line(
-    usage: &crate::usage::UsageMetrics,
+    usage: &angelica::usage::UsageMetrics,
     theme: &Theme,
     width: usize,
 ) -> Line<'static> {

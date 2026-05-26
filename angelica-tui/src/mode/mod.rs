@@ -7,10 +7,10 @@ pub use slash::{SlashAction, SlashMenuState};
 
 use tokio::sync::mpsc;
 
-use crate::llm::types::Role;
-use crate::agent::events::UserAction;
-use crate::tui::state::AppState;
-use crate::tui::types::{BUILTIN_COMMANDS, DisplayMessage};
+use crate::state::AppState;
+use crate::types::{BUILTIN_COMMANDS, DisplayMessage};
+use angelica::agent::events::UserAction;
+use angelica::llm::types::Role;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalChoice {
@@ -146,7 +146,9 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
                 let user_count = state
                     .messages
                     .iter()
-                    .filter(|m| matches!(m, DisplayMessage::Chat { role, .. } if *role == Role::User))
+                    .filter(
+                        |m| matches!(m, DisplayMessage::Chat { role, .. } if *role == Role::User),
+                    )
                     .count();
                 state.add_chat(
                     Role::System,
@@ -162,12 +164,16 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
                 let _ = tx.send(UserAction::RebuildEmbeddings).await;
             }
             "usage" | "stats" => {
-                let sessions = crate::usage::load_session_summaries(&state.usage_stats_path);
+                let sessions = angelica::usage::load_session_summaries(&state.usage_stats_path);
                 state.cached_usage_sessions = Some(sessions);
                 state.mode = AppMode::UsageStats;
             }
             _ => {
-                state.add_chat(Role::System, &format!("Unknown command: /{}", cmd_name), None);
+                state.add_chat(
+                    Role::System,
+                    &format!("Unknown command: /{}", cmd_name),
+                    None,
+                );
             }
         }
     } else {

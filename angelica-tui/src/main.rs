@@ -59,8 +59,7 @@ async fn main() -> anyhow::Result<()> {
         angelica::agent::run(config_clone, user_action_rx, app_event_tx, debug_tx).await
     });
 
-    angelica::tui::app::run_tui(app_event_rx, user_action_tx, model_name, conversation_path)
-        .await?;
+    angelica_tui::app::run_tui(app_event_rx, user_action_tx, model_name, conversation_path).await?;
 
     agent_handle.await??;
 

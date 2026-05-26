@@ -38,7 +38,10 @@ impl<S: RunMode> Agent<S> {
                 if !recalled.is_empty() && top_score > 0.0 {
                     tracing::info!(
                         "Recalled {} past episode(s), top score: {:.3}",
-                        recalled.lines().filter(|l| l.starts_with("事情发生的时间")).count(),
+                        recalled
+                            .lines()
+                            .filter(|l| l.starts_with("事情发生的时间"))
+                            .count(),
                         top_score
                     );
                     self.recall_text = recalled;

@@ -9,10 +9,10 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io::{self, Write};
 use tokio::sync::mpsc;
 
-use crate::llm::types::Role;
-use crate::agent::events::{AppEvent, UserAction};
-use crate::tui::mode::{self, AppMode};
-use crate::tui::state::AppState;
+use crate::mode::{self, AppMode};
+use crate::state::AppState;
+use angelica::agent::events::{AppEvent, UserAction};
+use angelica::llm::types::Role;
 
 pub async fn run_tui(
     mut app_event_rx: mpsc::Receiver<AppEvent>,
@@ -36,7 +36,7 @@ pub async fn run_tui(
     tokio::pin!(drag_scroll_sleep);
 
     loop {
-        terminal.draw(|f| crate::tui::draw::draw(f, &mut state))?;
+        terminal.draw(|f| crate::draw::draw(f, &mut state))?;
 
         if state.mouse.drag_scroll_pos.is_some() {
             drag_scroll_sleep

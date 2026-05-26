@@ -49,7 +49,10 @@ impl AgentState {
         fatigue.fatigue = deserialized.fatigue.fatigue();
         fatigue.turns = deserialized.fatigue.turns();
         fatigue.tool_calls = deserialized.fatigue.tool_calls();
-        Ok(AgentState { fatigue, ..deserialized })
+        Ok(AgentState {
+            fatigue,
+            ..deserialized
+        })
     }
 
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {

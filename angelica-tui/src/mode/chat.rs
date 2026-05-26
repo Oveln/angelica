@@ -2,9 +2,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::mpsc;
 
 use super::{AppMode, SlashMenuState, execute_slash_command};
-use crate::llm::types::Role;
-use crate::agent::events::UserAction;
-use crate::tui::state::AppState;
+use crate::state::AppState;
+use angelica::agent::events::UserAction;
+use angelica::llm::types::Role;
 
 pub async fn handle_key(state: &mut AppState, key: KeyEvent, tx: &mpsc::Sender<UserAction>) {
     match key.code {

@@ -25,15 +25,15 @@ Angelica 的每一行代码都服务于"灵"的存在感。所有设计决策应
 ## 构建与开发命令
 
 ```bash
-cargo build                  # 构建
-cargo run                    # 运行（debug）
-cargo run --release          # 运行（release）
-cargo test                   # 运行全部测试
-cargo test --lib             # 仅库测试
-cargo test <test_name>       # 运行单个测试
-cargo clippy                 # 代码检查
-cargo fmt                    # 格式化
-RUST_LOG=debug cargo run     # 带 debug 日志运行
+cargo build                          # 构建 workspace
+cargo run -p angelica-tui            # 运行 TUI（debug）
+cargo run -p angelica-tui --release  # 运行 TUI（release）
+cargo test                           # 运行全部测试
+cargo test --lib                     # 仅库测试
+cargo test <test_name>               # 运行单个测试
+cargo clippy                         # 代码检查
+cargo fmt                            # 格式化
+RUST_LOG=debug cargo run -p angelica-tui  # 带 debug 日志运行
 ```
 
 配置搜索顺序：`--config` 参数 > `~/.config/angelica/config.toml` > 内置默认值。API Key 从 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY` 环境变量读取。
@@ -71,18 +71,24 @@ RUST_LOG=debug cargo run     # 带 debug 日志运行
 
 ## 架构
 
+Workspace 包含三个 crate：
+
+- **`angelica`** — 核心库（agent、LLM、工具、记忆、睡眠等）
+- **`angelica-tui`** — 终端 UI 前端 + TUI 二进制入口（依赖 `angelica`）
+- **`angelica-gui`** — Tauri GUI 二进制（依赖 `angelica`）
+
 双任务架构，通过 tokio channel 通信：
 
 ```
-main()
- ├── tokio::spawn → agent::run()     (灵的核心)
- └── tui::app::run_tui()             (TUI 界面，随后 await 核心)
+angelica-tui/src/main.rs
+ ├── tokio::spawn → angelica::agent::run()     (灵的核心)
+ └── angelica_tui::app::run_tui()              (TUI 界面，随后 await 核心)
 ```
 
 - **AppEvent** channel（核心 → TUI）：思维流、表达、工具结果、审批请求
 - **UserAction** channel（TUI → 核心）：对话、审批/拒绝、中断、退出
 
-### 核心模块
+### 核心模块（angelica crate）
 
 | 模块 | 职责 |
 |---|---|
@@ -113,8 +119,23 @@ main()
 | `src/permission.rs` | 权限评估：glob 模式匹配 + 会话/持久化规则 |
 | `src/config.rs` | TOML 配置反序列化与路径解析 |
 | `src/skills/` | 技能发现（从 skills/ 目录加载 SKILL.md） |
-| `src/tui/` | 终端 UI（应用循环、渲染、模式、主题） |
 | `src/mcp/` | MCP 客户端（桩实现，尚未完成） |
+
+### TUI 模块（angelica-tui crate）
+
+| 模块 | 职责 |
+|---|---|
+| `angelica-tui/src/app.rs` | TUI 主循环（事件循环、crossterm 集成） |
+| `angelica-tui/src/draw.rs` | 布局渲染（欢迎屏、消息区、状态栏、输入框） |
+| `angelica-tui/src/event.rs` | AppEvent → AppState 映射 |
+| `angelica-tui/src/state.rs` | AppState 及所有 UI 状态（消息、滚动、鼠标等） |
+| `angelica-tui/src/input.rs` | InputBuffer（Unicode 感知的输入缓冲区） |
+| `angelica-tui/src/mouse.rs` | 鼠标事件处理（选择、悬停、拖拽滚动） |
+| `angelica-tui/src/diff.rs` | Diff 渲染（带行号的增删着色） |
+| `angelica-tui/src/theme.rs` | 主题定义（颜色、字形常量） |
+| `angelica-tui/src/types.rs` | DisplayMessage、Verbosity、SlashCommand 等类型 |
+| `angelica-tui/src/mode/` | 模式处理：Chat、Approval、SlashMenu |
+| `angelica-tui/src/render/` | 消息渲染管线：text wrapping、cards、components |
 
 ### 持久化数据
 

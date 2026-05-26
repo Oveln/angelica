@@ -1,5 +1,5 @@
-use crate::llm::types::Role;
-use crate::agent::events::AppEvent;
+use angelica::agent::events::AppEvent;
+use angelica::llm::types::Role;
 
 use super::mode::AppMode;
 use super::mode::approval::ApprovalState;

@@ -18,10 +18,12 @@ pub fn build_conversation_text(messages: &[ChatMessage]) -> String {
         match msg.role {
             Role::System => {
                 let name = msg.name.as_deref().unwrap_or("");
-                if name == "context" && last_context_idx == Some(i)
-                    && let Some(content) = &msg.content {
-                        text.push_str(&format!("[context] {}\n", content));
-                    }
+                if name == "context"
+                    && last_context_idx == Some(i)
+                    && let Some(content) = &msg.content
+                {
+                    text.push_str(&format!("[context] {}\n", content));
+                }
             }
             Role::User => {
                 let content = msg.content.as_deref().unwrap_or("");

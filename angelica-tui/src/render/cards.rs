@@ -6,7 +6,7 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::tui::theme::{CARD_BOT, CARD_MID, Theme};
+use crate::theme::{CARD_BOT, CARD_MID, Theme};
 
 use super::components::{card_bot, card_line, card_top};
 

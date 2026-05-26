@@ -1,4 +1,3 @@
-
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -59,27 +58,24 @@ impl McpClient {
         // Handshake: initialize.
         let init_result = timeout(
             Duration::from_secs(10),
-            transport
-                .request(
-                    "initialize",
-                    Some(json!({
-                        "protocolVersion": "2025-03-26",
-                        "capabilities": {},
-                        "clientInfo": { "name": "angelica", "version": "0.1.0" }
-                    })),
-                ),
+            transport.request(
+                "initialize",
+                Some(json!({
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": { "name": "angelica", "version": "0.1.0" }
+                })),
+            ),
         )
         .await
         .context(format!("timeout in initialize handshake with '{}'", name))?
         .context(format!("initialize failed for '{}'", name))?;
 
-        let _server_info: ServerInfo = serde_json::from_value(
-            init_result
-                .get("serverInfo")
-                .cloned()
-                .ok_or_else(|| anyhow::anyhow!("initialize response missing 'serverInfo' field"))?,
-        )
-        .context("invalid initialize response")?;
+        let _server_info: ServerInfo =
+            serde_json::from_value(init_result.get("serverInfo").cloned().ok_or_else(|| {
+                anyhow::anyhow!("initialize response missing 'serverInfo' field")
+            })?)
+            .context("invalid initialize response")?;
 
         // Send initialized notification.
         transport
@@ -99,11 +95,7 @@ impl McpClient {
         let tools = parse_tool_list(&tools_result)
             .context(format!("invalid tools/list response from '{}'", name))?;
 
-        tracing::info!(
-            "MCP server '{}' connected: {} tool(s)",
-            name,
-            tools.len()
-        );
+        tracing::info!("MCP server '{}' connected: {} tool(s)", name, tools.len());
 
         Ok(Self {
             name: name.to_string(),
@@ -117,10 +109,7 @@ impl McpClient {
         self.tools
             .iter()
             .map(|t| {
-                let desc = t
-                    .description
-                    .as_deref()
-                    .unwrap_or("(no description)");
+                let desc = t.description.as_deref().unwrap_or("(no description)");
                 ToolSpec::new(&t.name, desc, t.input_schema.clone())
             })
             .collect()
@@ -144,7 +133,10 @@ impl McpClient {
             ),
         )
         .await
-        .context(format!("timeout calling tool '{}' on '{}'", name, self.name))?
+        .context(format!(
+            "timeout calling tool '{}' on '{}'",
+            name, self.name
+        ))?
         .context(format!("tools/call '{}' on '{}' failed", name, self.name))?;
 
         // MCP tools/call returns { content: [{ type: "text", text: "..." }, ...], isError?: bool }
@@ -175,7 +167,10 @@ fn parse_tool_list(value: &Value) -> Result<Vec<DiscoveredTool>> {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("tool missing 'name'"))?
             .to_string();
-        let description = t.get("description").and_then(|v| v.as_str()).map(String::from);
+        let description = t
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let input_schema = t
             .get("inputSchema")
             .cloned()
@@ -191,7 +186,10 @@ fn parse_tool_list(value: &Value) -> Result<Vec<DiscoveredTool>> {
 
 /// Extract human-readable text from a tools/call result.
 fn extract_tool_result(value: &Value) -> Result<String> {
-    let is_error = value.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
+    let is_error = value
+        .get("isError")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let content = value
         .get("content")
@@ -300,7 +298,10 @@ mod tests {
         let specs = client.tool_specs();
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].function.name, "echo");
-        assert_eq!(specs[0].function.description.as_deref(), Some("Echo back the input"));
+        assert_eq!(
+            specs[0].function.description.as_deref(),
+            Some("Echo back the input")
+        );
 
         assert!(client.has_tool("echo"));
         assert!(!client.has_tool("nonexistent"));

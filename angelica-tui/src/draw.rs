@@ -691,12 +691,12 @@ fn draw_usage_stats(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) 
             .get(..16)
             .unwrap_or(&s.start_time)
             .replace('T', " ");
-        let scope_label = if s.scope == crate::usage::UsageScope::Awake {
+        let scope_label = if s.scope == angelica::usage::UsageScope::Awake {
             "\u{25CF} awake"
         } else {
             "\u{25CB} sleep"
         };
-        let scope_style = if s.scope == crate::usage::UsageScope::Awake {
+        let scope_style = if s.scope == angelica::usage::UsageScope::Awake {
             Style::default().fg(theme.success)
         } else {
             Style::default().fg(theme.status_muted)

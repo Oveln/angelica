@@ -18,7 +18,11 @@ pub async fn run(
         .iter()
         .map(HistoryEntry::from)
         .collect();
-    let _ = event_tx.send(AppEvent::Init { messages: init_messages }).await;
+    let _ = event_tx
+        .send(AppEvent::Init {
+            messages: init_messages,
+        })
+        .await;
 
     if let Err(e) = agent.initialize().await {
         let _ = event_tx
@@ -63,19 +67,25 @@ async fn run_loop(
                 agent = sleeping.run_sleep_cycle(event_tx, snapshot_ts).await;
             }
             UserAction::RebuildEmbeddings => {
-                let _ = event_tx.send(AppEvent::TextDelta {
-                    delta: "Rebuilding embeddings...\n".to_string(),
-                }).await;
+                let _ = event_tx
+                    .send(AppEvent::TextDelta {
+                        delta: "Rebuilding embeddings...\n".to_string(),
+                    })
+                    .await;
                 match agent.rebuild_embeddings().await {
                     Ok(count) => {
-                        let _ = event_tx.send(AppEvent::TextDone {
-                            full_text: format!("Rebuilt {} episode embedding(s).", count),
-                        }).await;
+                        let _ = event_tx
+                            .send(AppEvent::TextDone {
+                                full_text: format!("Rebuilt {} episode embedding(s).", count),
+                            })
+                            .await;
                     }
                     Err(e) => {
-                        let _ = event_tx.send(AppEvent::Error {
-                            message: format!("Rebuild failed: {}", e),
-                        }).await;
+                        let _ = event_tx
+                            .send(AppEvent::Error {
+                                message: format!("Rebuild failed: {}", e),
+                            })
+                            .await;
                     }
                 }
             }

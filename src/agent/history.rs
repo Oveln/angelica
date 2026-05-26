@@ -108,7 +108,9 @@ impl History {
         tool_calls: Option<Vec<ToolCall>>,
         usage: Option<crate::usage::UsageMetrics>,
     ) {
-        self.push(ChatMessage::assistant(content, reasoning, tool_calls, usage));
+        self.push(ChatMessage::assistant(
+            content, reasoning, tool_calls, usage,
+        ));
     }
 
     pub fn record_tool_result(&mut self, tool_call_id: String, content: String) {
@@ -142,21 +144,22 @@ impl History {
                 continue;
             }
             if let Ok(tm) = serde_json::from_str::<TimedMessage>(line)
-                && tm.message.tool_call_id.as_deref() == Some(tc_id) {
-                    let updated = TimedMessage {
-                        ts: tm.ts,
-                        message: ChatMessage {
-                            content: Some(content.to_string()),
-                            ..tm.message
-                        },
-                    };
-                    if let Ok(json) = serde_json::to_string(&updated) {
-                        out.push_str(&json);
-                        out.push('\n');
-                        patched = true;
-                        continue;
-                    }
+                && tm.message.tool_call_id.as_deref() == Some(tc_id)
+            {
+                let updated = TimedMessage {
+                    ts: tm.ts,
+                    message: ChatMessage {
+                        content: Some(content.to_string()),
+                        ..tm.message
+                    },
+                };
+                if let Ok(json) = serde_json::to_string(&updated) {
+                    out.push_str(&json);
+                    out.push('\n');
+                    patched = true;
+                    continue;
                 }
+            }
             out.push_str(line);
             out.push('\n');
         }
@@ -166,7 +169,6 @@ impl History {
             let _ = std::fs::write(&self.path, out);
         }
     }
-
 
     pub fn messages(&self) -> &[ChatMessage] {
         &self.messages
@@ -224,7 +226,12 @@ mod tests {
             let mut user_msg = ChatMessage::user("hello");
             user_msg.name = Some("user".to_string());
             history.push(user_msg);
-            history.push(ChatMessage::assistant(Some("hi".to_string()), None, None, None));
+            history.push(ChatMessage::assistant(
+                Some("hi".to_string()),
+                None,
+                None,
+                None,
+            ));
         }
 
         let loaded = History::load(path).unwrap();

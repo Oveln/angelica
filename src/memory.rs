@@ -69,7 +69,6 @@ impl MemoryManager {
         }
     }
 
-
     // ── Episodes ──
 
     pub fn read_episodes(&self) -> Vec<Episode> {
@@ -164,7 +163,11 @@ impl MemoryManager {
     pub fn read_self(&self) -> String {
         Self::ensure_file(&self.self_path, DEFAULT_SELF);
         let content = self.read_capped(&self.self_path);
-        if content.is_empty() { DEFAULT_SELF.to_string() } else { content }
+        if content.is_empty() {
+            DEFAULT_SELF.to_string()
+        } else {
+            content
+        }
     }
 
     pub fn write_self(&self, content: &str) {

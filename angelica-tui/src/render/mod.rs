@@ -13,7 +13,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use unicode_width::UnicodeWidthStr;
 
-use crate::llm::types::Role;
+use angelica::llm::types::Role;
 
 use super::state::AppState;
 use super::theme::{
@@ -54,7 +54,8 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
         if !lines.is_empty() {
             match (prev_role, current_role) {
                 // Tool following an assistant — same turn, thin separator
-                (Some(Role::Assistant), Some(Role::Tool)) | (Some(Role::Tool), Some(Role::Tool)) => {
+                (Some(Role::Assistant), Some(Role::Tool))
+                | (Some(Role::Tool), Some(Role::Tool)) => {
                     lines.push(spacer());
                 }
                 // Otherwise — full break between speakers
@@ -244,7 +245,7 @@ fn msg_role(msg: &DisplayMessage) -> Option<Role> {
     match msg {
         DisplayMessage::Chat { role, .. } => Some(*role),
         DisplayMessage::Tool { .. } => Some(Role::Tool),
-        DisplayMessage::Diff { .. } => None  /* diff */,
+        DisplayMessage::Diff { .. } => None, /* diff */
     }
 }
 

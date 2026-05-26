@@ -48,7 +48,11 @@ impl std::fmt::Display for Context {
             write!(f, "\n你的状态：{}", fatigue)?;
         }
         if self.turns > 0 {
-            write!(f, "\n本轮对话 {} 轮，使用 {} 次工具", self.turns, self.tool_calls)?;
+            write!(
+                f,
+                "\n本轮对话 {} 轮，使用 {} 次工具",
+                self.turns, self.tool_calls
+            )?;
         }
         if self.has_dream {
             write!(f, "\n你刚从梦中醒来，梦中的感受还隐约残留。")?;

@@ -9,9 +9,9 @@ use ratatui::{
 use tokio::sync::mpsc;
 
 use super::AppMode;
-use crate::tui::state::AppState;
-use crate::tui::theme::Theme;
-use crate::tui::types::{BUILTIN_COMMANDS, SlashCommand};
+use crate::state::AppState;
+use crate::theme::Theme;
+use crate::types::{BUILTIN_COMMANDS, SlashCommand};
 
 pub enum SlashAction {
     None,
@@ -64,7 +64,7 @@ impl Default for SlashMenuState {
 pub async fn handle_key(
     state: &mut AppState,
     key: KeyEvent,
-    _tx: &mpsc::Sender<crate::agent::events::UserAction>,
+    _tx: &mpsc::Sender<angelica::agent::events::UserAction>,
 ) -> SlashAction {
     match key.code {
         KeyCode::Esc => {

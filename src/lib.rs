@@ -1,7 +1,7 @@
 pub mod agent;
-pub mod debug;
 pub mod config;
 pub mod data_git;
+pub mod debug;
 pub mod embedding;
 pub mod episode;
 pub mod fatigue;
@@ -14,5 +14,4 @@ pub mod skills;
 pub mod sleep;
 pub mod state;
 pub mod tools;
-pub mod tui;
 pub mod usage;

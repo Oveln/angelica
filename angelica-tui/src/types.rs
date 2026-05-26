@@ -1,7 +1,7 @@
-pub use crate::tui::mode::{AppMode, ApprovalChoice};
+pub use crate::mode::{AppMode, ApprovalChoice};
 
-use crate::llm::types::Role;
-use crate::usage::UsageMetrics;
+use angelica::llm::types::Role;
+use angelica::usage::UsageMetrics;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verbosity {

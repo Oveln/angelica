@@ -106,5 +106,7 @@ impl RunMode for SleepingMode {
         UsageScope::Sleep
     }
 
-    fn mode_name(&self) -> &'static str { "sleeping" }
+    fn mode_name(&self) -> &'static str {
+        "sleeping"
+    }
 }

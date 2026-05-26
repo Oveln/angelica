@@ -9,10 +9,10 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use super::{AppMode, ApprovalChoice};
-use crate::agent::events::UserAction;
-use crate::tui::input::InputBuffer;
-use crate::tui::state::AppState;
-use crate::tui::theme::Theme;
+use crate::input::InputBuffer;
+use crate::state::AppState;
+use crate::theme::Theme;
+use angelica::agent::events::UserAction;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ApprovalState {

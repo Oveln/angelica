@@ -1,15 +1,12 @@
 use std::sync::Mutex;
-use tokio::sync::mpsc;
 use tauri::{Emitter, Manager};
+use tokio::sync::mpsc;
 
 use angelica::agent::events::{AppEvent, UserAction};
 use angelica::config::Config;
 
 #[tauri::command]
-async fn send_message(
-    state: tauri::State<'_, AppState>,
-    content: String,
-) -> Result<(), String> {
+async fn send_message(state: tauri::State<'_, AppState>, content: String) -> Result<(), String> {
     tracing::info!("send_message called: {:?}", content);
     let tx = state.user_tx.lock().map_err(|e| e.to_string())?.clone();
     tx.send(UserAction::SendMessage { content })
@@ -184,7 +181,10 @@ fn show_fatal_dialog(message: &str) {
     {
         let script = format!(
             "display dialog \"{}\" buttons {{\"OK\"}} default button \"OK\" with title \"祈芷\" with icon stop",
-            message.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+            message
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
         );
         let _ = std::process::Command::new("osascript")
             .arg("-e")
@@ -201,19 +201,37 @@ fn show_fatal_dialog(message: &str) {
 fn serialize_event(event: &AppEvent) -> (&'static str, serde_json::Value) {
     match event {
         AppEvent::Init { messages } => ("init", serde_json::json!({ "messages": messages })),
-        AppEvent::ThinkingDelta { delta } => ("thinking-delta", serde_json::json!({ "delta": delta })),
+        AppEvent::ThinkingDelta { delta } => {
+            ("thinking-delta", serde_json::json!({ "delta": delta }))
+        }
         AppEvent::TextDelta { delta } => ("text-delta", serde_json::json!({ "delta": delta })),
-        AppEvent::TextDone { full_text } => ("text-done", serde_json::json!({ "full_text": full_text })),
+        AppEvent::TextDone { full_text } => {
+            ("text-done", serde_json::json!({ "full_text": full_text }))
+        }
         AppEvent::TurnComplete => ("turn-complete", serde_json::json!({})),
-        AppEvent::ToolCalling { call_id, name, arguments } => (
+        AppEvent::ToolCalling {
+            call_id,
+            name,
+            arguments,
+        } => (
             "tool-calling",
             serde_json::json!({ "call_id": call_id, "name": name, "arguments": arguments }),
         ),
-        AppEvent::ToolResult { call_id, name, result, diff_preview } => (
+        AppEvent::ToolResult {
+            call_id,
+            name,
+            result,
+            diff_preview,
+        } => (
             "tool-result",
             serde_json::json!({ "call_id": call_id, "name": name, "result": result, "diff_preview": diff_preview }),
         ),
-        AppEvent::ApprovalPending { call_id, tool_name, tool_target, preview } => (
+        AppEvent::ApprovalPending {
+            call_id,
+            tool_name,
+            tool_target,
+            preview,
+        } => (
             "approval-pending",
             serde_json::json!({ "call_id": call_id, "tool_name": tool_name, "tool_target": tool_target, "preview": preview }),
         ),
@@ -222,14 +240,18 @@ fn serialize_event(event: &AppEvent) -> (&'static str, serde_json::Value) {
             serde_json::json!({ "call_id": call_id, "feedback": feedback }),
         ),
         AppEvent::Error { message } => ("error", serde_json::json!({ "message": message })),
-        AppEvent::FatigueUpdate { fatigue, turns, tool_calls, desc } => (
+        AppEvent::FatigueUpdate {
+            fatigue,
+            turns,
+            tool_calls,
+            desc,
+        } => (
             "fatigue-update",
             serde_json::json!({ "fatigue": fatigue, "turns": turns, "tool_calls": tool_calls, "desc": desc }),
         ),
-        AppEvent::UsageUpdate { record } => (
-            "usage-update",
-            serde_json::json!({ "record": record }),
-        ),
+        AppEvent::UsageUpdate { record } => {
+            ("usage-update", serde_json::json!({ "record": record }))
+        }
         AppEvent::FallingAsleep => ("falling-asleep", serde_json::json!({})),
         AppEvent::Sleeping => ("sleeping", serde_json::json!({})),
         AppEvent::WakingUp { dream } => ("waking-up", serde_json::json!({ "dream": dream })),

@@ -58,7 +58,6 @@ impl Episode {
         self.afterglow = a;
         self
     }
-
 }
 
 /// Read all episodes from a JSONL file.

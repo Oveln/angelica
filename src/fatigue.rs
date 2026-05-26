@@ -40,7 +40,8 @@ impl FatigueModel {
         let ratio = (total_tokens as f64 / self.max_context_tokens as f64).min(1.0);
         tracing::info!(
             "Context tokens: {}, fatigue ratio: {:.3}",
-            total_tokens, ratio
+            total_tokens,
+            ratio
         );
         self.fatigue = ratio.powf(self.curve_exponent + 1.0);
     }
@@ -204,7 +205,10 @@ mod tests {
             assert!(
                 deltas[i] > deltas[i - 1],
                 "delta[{}]={} should > delta[{}]={}",
-                i, deltas[i], i - 1, deltas[i - 1]
+                i,
+                deltas[i],
+                i - 1,
+                deltas[i - 1]
             );
         }
     }
