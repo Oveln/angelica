@@ -277,4 +277,5 @@ dispatch() → PermissionAction::Ask → AppEvent::ApprovalPending
 
 1. 修改代码
 2. `cargo test && cargo clippy`
-3. 全部通过后向用户确认是否提交
+3. 全部通过后通过 subagent 审阅 diff，确认无遗漏、无错误
+4. 审阅通过后再提交
