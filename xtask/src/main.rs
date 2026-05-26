@@ -1,5 +1,11 @@
 use std::env;
+use std::path::PathBuf;
 use std::process::{Command, exit};
+
+fn project_root() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir.parent().unwrap().to_path_buf()
+}
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -15,17 +21,15 @@ fn main() {
             run(&mut c);
         }
         "gui" => {
-            let status = Command::new("cargo")
-                .args([
-                    "run",
-                    "-p",
-                    "angelica-gui",
-                ])
-                .status()
-                .expect("failed to start gui");
-            if !status.success() {
-                exit(status.code().unwrap_or(1));
+            let tauri_dir = project_root().join("angelica-gui").join("src-tauri");
+            if !tauri_dir.exists() {
+                eprintln!("error: {} not found", tauri_dir.display());
+                exit(1);
             }
+            let mut c = Command::new("cargo");
+            c.args(["tauri", "dev"]);
+            c.current_dir(&tauri_dir);
+            run(&mut c);
         }
         "-h" | "--help" | "help" => {
             println!("angelica xtask — unified dev entry point\n");
