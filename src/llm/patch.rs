@@ -14,6 +14,7 @@ impl ModelPatch {
             Some(v) => v,
             None => model.starts_with("deepseek"),
         };
+        tracing::debug!("ModelPatch for model '{}': role_immersion={}", model, role_immersion);
         Self { role_immersion }
     }
 
