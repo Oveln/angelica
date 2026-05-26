@@ -7,7 +7,6 @@ use angelica::config::Config;
 
 #[tauri::command]
 async fn send_message(state: tauri::State<'_, AppState>, content: String) -> Result<(), String> {
-    tracing::info!("send_message called: {:?}", content);
     let tx = state.user_tx.lock().map_err(|e| e.to_string())?.clone();
     tx.send(UserAction::SendMessage { content })
         .await
@@ -54,6 +53,30 @@ async fn reject_tool(
 async fn force_sleep(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let tx = state.user_tx.lock().map_err(|e| e.to_string())?.clone();
     tx.send(UserAction::ForceSleep)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn rebuild_embeddings(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let tx = state.user_tx.lock().map_err(|e| e.to_string())?.clone();
+    tx.send(UserAction::RebuildEmbeddings)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn request_usage_stats(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let tx = state.user_tx.lock().map_err(|e| e.to_string())?.clone();
+    tx.send(UserAction::UsageStats)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn request_init(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let tx = state.user_tx.lock().map_err(|e| e.to_string())?.clone();
+    tx.send(UserAction::RequestInit)
         .await
         .map_err(|e| e.to_string())
 }
@@ -114,7 +137,6 @@ pub fn run() {
         .setup(move |app| {
             let app_handle = app.handle().clone();
 
-            // On window close, tell agent to quit so it saves state
             if let Some(window) = app.get_webview_window("main") {
                 let qtx = quit_tx.clone();
                 window.on_window_event(move |event| {
@@ -145,6 +167,9 @@ pub fn run() {
             approve_always,
             reject_tool,
             force_sleep,
+            rebuild_embeddings,
+            request_usage_stats,
+            request_init,
             quit,
         ])
         .run(tauri::generate_context!())
@@ -200,7 +225,18 @@ fn show_fatal_dialog(message: &str) {
 
 fn serialize_event(event: &AppEvent) -> (&'static str, serde_json::Value) {
     match event {
-        AppEvent::Init { messages } => ("init", serde_json::json!({ "messages": messages })),
+        AppEvent::Init {
+            entries,
+            current_usage,
+            model_name,
+        } => (
+            "init",
+            serde_json::json!({
+                "entries": entries,
+                "current_usage": current_usage,
+                "model_name": model_name,
+            }),
+        ),
         AppEvent::ThinkingDelta { delta } => {
             ("thinking-delta", serde_json::json!({ "delta": delta }))
         }
@@ -212,10 +248,10 @@ fn serialize_event(event: &AppEvent) -> (&'static str, serde_json::Value) {
         AppEvent::ToolCalling {
             call_id,
             name,
-            arguments,
+            display,
         } => (
             "tool-calling",
-            serde_json::json!({ "call_id": call_id, "name": name, "arguments": arguments }),
+            serde_json::json!({ "call_id": call_id, "name": name, "display": display }),
         ),
         AppEvent::ToolResult {
             call_id,
@@ -224,16 +260,30 @@ fn serialize_event(event: &AppEvent) -> (&'static str, serde_json::Value) {
             diff_preview,
         } => (
             "tool-result",
-            serde_json::json!({ "call_id": call_id, "name": name, "result": result, "diff_preview": diff_preview }),
+            serde_json::json!({
+                "call_id": call_id,
+                "name": name,
+                "result": result,
+                "diff_preview": diff_preview,
+            }),
         ),
         AppEvent::ApprovalPending {
             call_id,
             tool_name,
             tool_target,
             preview,
+            tool_label,
+            is_diff,
         } => (
             "approval-pending",
-            serde_json::json!({ "call_id": call_id, "tool_name": tool_name, "tool_target": tool_target, "preview": preview }),
+            serde_json::json!({
+                "call_id": call_id,
+                "tool_name": tool_name,
+                "tool_target": tool_target,
+                "preview": preview,
+                "tool_label": tool_label,
+                "is_diff": is_diff,
+            }),
         ),
         AppEvent::ToolRejected { call_id, feedback } => (
             "tool-rejected",
@@ -247,11 +297,20 @@ fn serialize_event(event: &AppEvent) -> (&'static str, serde_json::Value) {
             desc,
         } => (
             "fatigue-update",
-            serde_json::json!({ "fatigue": fatigue, "turns": turns, "tool_calls": tool_calls, "desc": desc }),
+            serde_json::json!({
+                "fatigue": fatigue,
+                "turns": turns,
+                "tool_calls": tool_calls,
+                "desc": desc,
+            }),
         ),
         AppEvent::UsageUpdate { record } => {
-            ("usage-update", serde_json::json!({ "record": record }))
+            ("usage-update", serde_json::json!({ "record": record.metrics }))
         }
+        AppEvent::UsageStatsLoaded { sessions } => (
+            "usage-stats-loaded",
+            serde_json::json!({ "sessions": sessions }),
+        ),
         AppEvent::FallingAsleep => ("falling-asleep", serde_json::json!({})),
         AppEvent::Sleeping => ("sleeping", serde_json::json!({})),
         AppEvent::WakingUp { dream } => ("waking-up", serde_json::json!({ "dream": dream })),

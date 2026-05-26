@@ -76,7 +76,7 @@ impl UsageRecord {
 }
 
 /// A single session's aggregated usage (one awake or sleep cycle).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct SessionUsage {
     pub scope: UsageScope,
     pub start_time: String,
@@ -143,6 +143,22 @@ pub fn load_session_summaries(path: &std::path::Path) -> Vec<SessionUsage> {
     sessions.push(current);
 
     sessions
+}
+
+pub fn restore_current_usage(path: &std::path::Path) -> Option<UsageMetrics> {
+    let sessions = load_session_summaries(path);
+    let last = sessions.last()?;
+    if last.scope != UsageScope::Awake {
+        return None;
+    }
+    Some(UsageMetrics {
+        prompt_tokens: last.prompt_tokens,
+        completion_tokens: last.completion_tokens,
+        total_tokens: last.total_tokens,
+        reasoning_tokens: last.reasoning_tokens,
+        cache_hit_tokens: last.cache_hit_tokens,
+        cache_miss_tokens: last.cache_miss_tokens,
+    })
 }
 
 #[cfg(test)]

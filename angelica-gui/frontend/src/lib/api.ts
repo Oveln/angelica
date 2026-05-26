@@ -1,8 +1,6 @@
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 
-// --- Events from backend (AppEvent) ---
-
 export interface ThinkingDelta { delta: string }
 export interface TextDelta { delta: string }
 export interface TextDone { full_text: string }
@@ -11,7 +9,7 @@ export interface TurnComplete {}
 export interface ToolCalling {
   call_id: string;
   name: string;
-  arguments: string;
+  display: string;
 }
 
 export interface ToolResult {
@@ -26,6 +24,8 @@ export interface ApprovalPending {
   tool_name: string;
   tool_target: string | null;
   preview: string;
+  tool_label: string;
+  is_diff: boolean;
 }
 
 export interface ToolRejected {
@@ -42,51 +42,44 @@ export interface FatigueUpdate {
   desc: string;
 }
 
+export interface UsageMetrics {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  reasoning_tokens: number;
+  cache_hit_tokens: number;
+  cache_miss_tokens: number;
+}
+
 export interface UsageUpdate {
-  record: unknown;
+  record: UsageMetrics;
 }
 
-export interface InitMessage {
-  role: string;
-  content: string | null;
-  context?: {
-    time: string;
-    fatigue?: string | null;
-    turns: number;
-    tool_calls: number;
-    has_dream: boolean;
-    recall?: string | null;
-  } | null;
-  reasoning_content?: string | null;
-  tool_calls?: Array<{
-    id: string;
-    function: { name: string; arguments: string };
-  }> | null;
-  tool_call_id?: string | null;
-  name?: string | null;
+export interface SessionUsage {
+  scope: 'awake' | 'sleep';
+  start_time: string;
+  iterations: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  reasoning_tokens: number;
+  cache_hit_tokens: number;
+  cache_miss_tokens: number;
 }
 
-export interface InitEvent { messages: InitMessage[] }
+export interface InitEvent {
+  entries: DisplayEntry[];
+  current_usage: UsageMetrics | null;
+  model_name: string;
+}
 
-export type AppEventMap = {
-  'init': InitEvent;
-  'thinking-delta': ThinkingDelta;
-  'text-delta': TextDelta;
-  'text-done': TextDone;
-  'turn-complete': TurnComplete;
-  'tool-calling': ToolCalling;
-  'tool-result': ToolResult;
-  'approval-pending': ApprovalPending;
-  'tool-rejected': ToolRejected;
-  'error': ErrorEvent;
-  'fatigue-update': FatigueUpdate;
-  'usage-update': UsageUpdate;
-  'falling-asleep': {};
-  'sleeping': {};
-  'waking-up': { dream: string };
-};
+export type DisplayEntry =
+  | { type: 'chat'; role: 'user' | 'assistant' | 'system'; content: string; thinking: string | null }
+  | { type: 'tool'; call_id: string; name: string; args_display: string; result: string | null; diff_preview: string | null };
 
-// --- Commands to backend (UserAction) ---
+export function requestInit(): Promise<void> {
+  return invoke('request_init');
+}
 
 export function sendMessage(content: string): Promise<void> {
   return invoke('send_message', { content });
@@ -108,11 +101,36 @@ export function forceSleep(): Promise<void> {
   return invoke('force_sleep');
 }
 
+export function rebuildEmbeddings(): Promise<void> {
+  return invoke('rebuild_embeddings');
+}
+
+export function requestUsageStats(): Promise<void> {
+  return invoke('request_usage_stats');
+}
+
 export function quit(): Promise<void> {
   return invoke('quit');
 }
 
-// --- Typed event listener ---
+export type AppEventMap = {
+  'init': InitEvent;
+  'thinking-delta': ThinkingDelta;
+  'text-delta': TextDelta;
+  'text-done': TextDone;
+  'turn-complete': TurnComplete;
+  'tool-calling': ToolCalling;
+  'tool-result': ToolResult;
+  'approval-pending': ApprovalPending;
+  'tool-rejected': ToolRejected;
+  'error': ErrorEvent;
+  'fatigue-update': FatigueUpdate;
+  'usage-update': UsageUpdate;
+  'usage-stats-loaded': { sessions: SessionUsage[] };
+  'falling-asleep': {};
+  'sleeping': {};
+  'waking-up': { dream: string };
+};
 
 export function onAppEvent<K extends keyof AppEventMap>(
   event: K,

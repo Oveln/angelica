@@ -8,11 +8,17 @@ use super::types::*;
 
 impl AppState {
     pub fn handle_event(&mut self, event: &AppEvent) {
-        if matches!(self.mode, AppMode::Welcome) {
-            self.load_conversation();
-        }
-
         match event {
+            AppEvent::Init {
+                entries,
+                current_usage,
+                model_name,
+            } => {
+                self.pending_init = Some((entries.clone(), *current_usage, model_name.clone()));
+                if !matches!(self.mode, AppMode::Welcome) {
+                    self.apply_pending_init();
+                }
+            }
             AppEvent::ThinkingDelta { delta } => {
                 self.thinking_buffer.push_str(delta);
                 self.mode = AppMode::Streaming;
@@ -33,6 +39,15 @@ impl AppState {
                 self.text_buffer.clear();
             }
             AppEvent::TurnComplete => {
+                if !self.text_buffer.is_empty() || !self.thinking_buffer.is_empty() {
+                    let thinking = if self.thinking_buffer.is_empty() {
+                        None
+                    } else {
+                        Some(std::mem::take(&mut self.thinking_buffer))
+                    };
+                    let text = std::mem::take(&mut self.text_buffer);
+                    self.add_chat(Role::Assistant, &text, thinking);
+                }
                 self.is_streaming = false;
                 self.mode = AppMode::Chat;
             }
@@ -48,9 +63,9 @@ impl AppState {
             AppEvent::ToolCalling {
                 call_id,
                 name,
-                arguments,
+                display,
             } => {
-                if !self.text_buffer.is_empty() {
+                if !self.text_buffer.is_empty() || !self.thinking_buffer.is_empty() {
                     let thinking = if self.thinking_buffer.is_empty() {
                         None
                     } else {
@@ -59,36 +74,17 @@ impl AppState {
                     let text = std::mem::take(&mut self.text_buffer);
                     self.add_chat(Role::Assistant, &text, thinking);
                 }
-                let display = self.format_tool_args(name, arguments);
-                self.add_tool_call(call_id.clone(), name.clone(), display);
+                self.add_tool_call(call_id.clone(), name.clone(), display.clone());
             }
             AppEvent::ApprovalPending {
                 call_id,
                 tool_name,
                 tool_target,
                 preview,
+                tool_label,
+                is_diff,
             } => {
-                let first_line = preview.lines().next().unwrap_or("");
-
-                let tool_label = if first_line.starts_with("$ ") {
-                    format!("\u{2192} {}", first_line)
-                } else if first_line.starts_with("---") || first_line.starts_with("diff ") {
-                    let second = preview.lines().nth(1).unwrap_or("");
-                    if let Some(path) = second.strip_prefix("+++ ") {
-                        format!(
-                            "\u{2192} edit {}",
-                            path.trim_start_matches('b').trim_start_matches('/')
-                        )
-                    } else {
-                        "\u{2192} edit".to_string()
-                    }
-                } else {
-                    format!("\u{2192} {}", first_line)
-                };
-
-                let has_diff_content = preview.lines().count() > 1 || !preview.starts_with("$ ");
-
-                if has_diff_content {
+                if *is_diff {
                     if let Some(DisplayMessage::Tool { hidden, .. }) = self.messages.last_mut() {
                         *hidden = true;
                     }
@@ -99,7 +95,7 @@ impl AppState {
                 self.mode = AppMode::Approval(ApprovalState::new(
                     call_id.clone(),
                     tool_name.clone(),
-                    tool_label,
+                    tool_label.clone(),
                     tool_target.clone(),
                 ));
             }
@@ -140,8 +136,9 @@ impl AppState {
                 self.usage.accumulate(&record.metrics);
                 self.last_total_tokens = record.metrics.total_tokens;
             }
-            AppEvent::Init { .. } => {
-                // TUI loads conversation independently via load_conversation()
+            AppEvent::UsageStatsLoaded { sessions } => {
+                self.cached_usage_sessions = Some(sessions.clone());
+                self.mode = AppMode::UsageStats;
             }
         }
     }

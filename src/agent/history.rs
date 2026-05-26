@@ -1,7 +1,8 @@
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
-use crate::llm::types::{ChatMessage, ToolCall};
+use crate::agent::events::{DisplayEntry, DisplayRole, format_args_brief};
+use crate::llm::types::{ChatMessage, Role, ToolCall};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TimedMessage {
@@ -174,6 +175,71 @@ impl History {
         &self.messages
     }
 
+    pub fn to_display_entries(&self) -> Vec<DisplayEntry> {
+        let mut entries = Vec::new();
+        for msg in &self.messages {
+            match msg.role {
+                Role::User => {
+                    let raw = msg.content.as_deref().unwrap_or("");
+                    let content = strip_baked_context(raw);
+                    if content.is_empty() {
+                        continue;
+                    }
+                    entries.push(DisplayEntry::Chat {
+                        role: DisplayRole::User,
+                        content: content.to_string(),
+                        thinking: None,
+                    });
+                }
+                Role::Assistant => {
+                    let content = msg.content.as_deref().unwrap_or("");
+                    if content.is_empty() && msg.tool_calls.is_none() {
+                        continue;
+                    }
+                    if !content.is_empty() {
+                        entries.push(DisplayEntry::Chat {
+                            role: DisplayRole::Assistant,
+                            content: content.to_string(),
+                            thinking: msg.reasoning_content.clone(),
+                        });
+                    }
+                    if let Some(tool_calls) = &msg.tool_calls {
+                        for tc in tool_calls {
+                            let display = format!(
+                                "{}({})",
+                                tc.function.name,
+                                format_args_brief(&tc.function.arguments)
+                            );
+                            entries.push(DisplayEntry::Tool {
+                                call_id: tc.id.clone(),
+                                name: tc.function.name.clone(),
+                                args_display: display,
+                                result: None,
+                                diff_preview: None,
+                            });
+                        }
+                    }
+                }
+                Role::Tool => {
+                    if let Some(DisplayEntry::Tool { result, .. }) = entries.iter_mut().rev().find(
+                        |e| matches!(e, DisplayEntry::Tool { call_id, .. } if *call_id == msg.tool_call_id.as_deref().unwrap_or("")),
+                    ) {
+                        *result = Some(
+                            msg.content
+                                .as_deref()
+                                .unwrap_or("")
+                                .chars()
+                                .take(200)
+                                .collect(),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+        entries
+    }
+
     pub fn clear(&mut self) {
         self.messages.clear();
         self.buf_writer = None;
@@ -207,6 +273,15 @@ impl Default for History {
 impl Drop for History {
     fn drop(&mut self) {
         self.flush();
+    }
+}
+
+fn strip_baked_context(content: &str) -> &str {
+    const MARKER: &str = "[以下是用户的输入]\n";
+    if let Some(pos) = content.find(MARKER) {
+        content[pos + MARKER.len()..].trim_start()
+    } else {
+        content
     }
 }
 
@@ -427,5 +502,30 @@ mod tests {
         for msg in history.messages() {
             assert_eq!(msg.content.as_deref(), Some(result));
         }
+    }
+
+    #[test]
+    fn strip_context_basic() {
+        assert_eq!(
+            strip_baked_context(
+                "[以下为系统上下文，不是用户的输入]\n当前时间：2026-05-22\n你的状态：精神饱满。\n\n[以下是用户的输入]\n感觉如何"
+            ),
+            "感觉如何"
+        );
+    }
+
+    #[test]
+    fn no_double_newline_passthrough() {
+        assert_eq!(strip_baked_context("普通消息"), "普通消息");
+    }
+
+    #[test]
+    fn empty_after_strip() {
+        assert_eq!(
+            strip_baked_context(
+                "[以下为系统上下文，不是用户的输入]\n上下文\n\n[以下是用户的输入]\n"
+            ),
+            ""
+        );
     }
 }

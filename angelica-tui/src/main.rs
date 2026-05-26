@@ -53,13 +53,12 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let model_name = config.llm.default_model_name().to_string();
-    let conversation_path = config.state.conversation_path.clone();
     let config_clone = config;
     let agent_handle = tokio::spawn(async move {
         angelica::agent::run(config_clone, user_action_rx, app_event_tx, debug_tx).await
     });
 
-    angelica_tui::app::run_tui(app_event_rx, user_action_tx, model_name, conversation_path).await?;
+    angelica_tui::app::run_tui(app_event_rx, user_action_tx, model_name).await?;
 
     agent_handle.await??;
 

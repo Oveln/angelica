@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 
 use super::Agent;
-use super::events::AppEvent;
+use super::events::{AppEvent, format_approval_label, format_tool_call_display};
 use super::group::{BatchedEdit, GroupedEdit, PendingApproval, ToolCallGroup};
 use super::modes::RunMode;
 use crate::llm::types::ToolCall;
@@ -39,11 +39,12 @@ impl<S: RunMode> Agent<S> {
             return;
         }
 
+        let display = format_tool_call_display(name, arguments);
         let _ = event_tx
             .send(AppEvent::ToolCalling {
                 call_id: call_id.to_string(),
                 name: name.to_string(),
-                arguments: arguments.to_string(),
+                display,
             })
             .await;
     }
@@ -156,6 +157,7 @@ impl<S: RunMode> Agent<S> {
             PermissionAction::Ask => {
                 let preview = self.make_approval_preview(&name, &args, None);
                 let diff_preview = extract_diff_preview(&preview);
+                let (tool_label, is_diff) = format_approval_label(&preview);
 
                 if stream_to_tui {
                     let _ = event_tx
@@ -164,6 +166,8 @@ impl<S: RunMode> Agent<S> {
                             tool_name: name.clone(),
                             tool_target: target.clone(),
                             preview,
+                            tool_label,
+                            is_diff,
                         })
                         .await;
                 }
@@ -307,6 +311,7 @@ impl<S: RunMode> Agent<S> {
                     preview: extract_diff_preview(&preview),
                 });
 
+                let (tool_label, is_diff) = format_approval_label(&preview);
                 if stream_to_tui {
                     let _ = event_tx
                         .send(AppEvent::ApprovalPending {
@@ -314,6 +319,8 @@ impl<S: RunMode> Agent<S> {
                             tool_name: "edit_file".to_string(),
                             tool_target: Some(path),
                             preview,
+                            tool_label,
+                            is_diff,
                         })
                         .await;
                 }
@@ -387,11 +394,12 @@ impl<S: RunMode> Agent<S> {
 
         if stream_to_tui {
             for tc_id in &tc_ids {
+                let display = format_tool_call_display(&tool_name, &display_args);
                 let _ = event_tx
                     .send(AppEvent::ToolCalling {
                         call_id: tc_id.clone(),
                         name: tool_name.clone(),
-                        arguments: display_args.clone(),
+                        display,
                     })
                     .await;
             }

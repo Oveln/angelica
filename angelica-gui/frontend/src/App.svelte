@@ -1,274 +1,110 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import {
-    onAppEvent,
     sendMessage,
     approvePending,
     approveAlways,
     rejectTool,
-    type ApprovalPending as ApprovalPayload,
-    type ToolCalling,
-    type ToolResult,
-    type FatigueUpdate,
-    type InitEvent,
-    type InitMessage,
+    requestUsageStats,
   } from '$lib/api';
-  import type { Message } from '$lib/types';
-  import { genId } from '$lib/types';
+  import { executeSlashCommand } from '$lib/commands.svelte';
+  import { getStore } from '$lib/store.svelte';
   import MessageList from './components/MessageList.svelte';
   import InputBar from './components/InputBar.svelte';
   import StatusBar from './components/StatusBar.svelte';
   import ApprovalPanel from './components/ApprovalPanel.svelte';
+  import SlashMenu from './components/SlashMenu.svelte';
+  import UsageStats from './components/UsageStats.svelte';
 
-  let messages = $state<Message[]>([]);
-  let currentAssistant: Message | null = null;
+  const s = getStore();
+
   let inputText = $state('');
-  let isLoading = $state(false);
-  let fatigue = $state(0);
-  let statusText = $state('');
-  let approval = $state<ApprovalPayload | null>(null);
+  let showSlashMenu = $state(false);
   let listEl: HTMLDivElement | undefined = $state();
-  let scrollTick = $state(0);
 
-  const unsubs: (() => void)[] = [];
-
-  let initLoaded = $state(false);
-
-  onMount(async () => {
-    unsubs.push(await onAppEvent('init', (p: InitEvent) => {
-      if (!initLoaded) {
-        messages = convertHistoryToMessages(p.messages);
-        initLoaded = true;
-      }
-    }));
-
-    unsubs.push(await onAppEvent('text-delta', (p) => {
-      ensureAssistant();
-      if (currentAssistant) currentAssistant.content += p.delta;
-      isLoading = true;
-      scrollTick++;
-    }));
-
-    unsubs.push(await onAppEvent('thinking-delta', (p) => {
-      ensureAssistant();
-      if (currentAssistant) currentAssistant.thinking += p.delta;
-      scrollTick++;
-    }));
-
-    unsubs.push(await onAppEvent('text-done', () => {
-      if (currentAssistant) {
-        currentAssistant.done = true;
-        currentAssistant = null;
-      }
-      isLoading = false;
-      scrollTick++;
-    }));
-
-    unsubs.push(await onAppEvent('turn-complete', () => {
-      if (currentAssistant) {
-        currentAssistant.done = true;
-        currentAssistant = null;
-      }
-      isLoading = false;
-      scrollTick++;
-    }));
-
-    unsubs.push(await onAppEvent('tool-calling', (p: ToolCalling) => {
-      ensureAssistant();
-      if (currentAssistant) {
-        currentAssistant.toolCalls.push({
-          callId: p.call_id,
-          name: p.name,
-          arguments: p.arguments,
-          pending: true,
-        });
-        scrollTick++;
-      }
-    }));
-
-    unsubs.push(await onAppEvent('tool-result', (p: ToolResult) => {
-      if (currentAssistant) {
-        const tc = currentAssistant.toolCalls.find((t) => t.callId === p.call_id);
-        if (tc) {
-          tc.result = p.result;
-          tc.diffPreview = p.diff_preview;
-          tc.pending = false;
-          scrollTick++;
-        }
-      }
-    }));
-
-    unsubs.push(await onAppEvent('approval-pending', (p: ApprovalPayload) => {
-      approval = p;
-    }));
-
-    unsubs.push(await onAppEvent('tool-rejected', () => {
-      approval = null;
-    }));
-
-    unsubs.push(await onAppEvent('error', (p) => {
-      messages.push({
-        id: genId(),
-        role: 'system',
-        content: p.message,
-        thinking: '',
-        toolCalls: [],
-        timestamp: Date.now(),
-        done: true,
-      });
-      isLoading = false;
-      scrollTick++;
-    }));
-
-    unsubs.push(await onAppEvent('fatigue-update', (p: FatigueUpdate) => {
-      fatigue = p.fatigue;
-      statusText = p.desc;
-    }));
-
-    unsubs.push(await onAppEvent('falling-asleep', () => {
-      statusText = '正在入睡...';
-    }));
-
-    unsubs.push(await onAppEvent('sleeping', () => {
-      statusText = '沉睡中';
-    }));
-
-    unsubs.push(await onAppEvent('waking-up', (p) => {
-      statusText = '苏醒';
-      messages.push({
-        id: genId(),
-        role: 'system',
-        content: p.dream,
-        thinking: '',
-        toolCalls: [],
-        timestamp: Date.now(),
-        done: true,
-      });
-      scrollTick++;
-    }));
+  onMount(() => {
+    s.init();
+    return () => s.destroy();
   });
-
-  function ensureAssistant() {
-    if (!currentAssistant) {
-      const id = genId();
-      messages.push({
-        id,
-        role: 'assistant',
-        content: '',
-        thinking: '',
-        toolCalls: [],
-        timestamp: Date.now(),
-        done: false,
-      });
-      currentAssistant = messages[messages.length - 1];
-    }
-  }
-
-  function convertHistoryToMessages(entries: InitMessage[]): Message[] {
-    const results: Message[] = [];
-    for (const entry of entries) {
-      if (entry.role === 'system') continue;
-      if (entry.role === 'user') {
-        results.push({
-          id: genId(),
-          role: 'user',
-          content: entry.content ?? '',
-          thinking: '',
-          toolCalls: [],
-          timestamp: Date.now(),
-          done: true,
-        });
-      } else if (entry.role === 'assistant') {
-        const hasToolCalls = entry.tool_calls && entry.tool_calls.length > 0;
-        results.push({
-          id: genId(),
-          role: 'assistant',
-          content: entry.content ?? '',
-          thinking: entry.reasoning_content ?? '',
-          toolCalls: hasToolCalls
-            ? entry.tool_calls!.map((tc) => ({
-                callId: tc.id,
-                name: tc.function.name,
-                arguments: tc.function.arguments,
-                pending: true,
-              }))
-            : [],
-          timestamp: Date.now(),
-          done: true,
-        });
-      } else if (entry.role === 'tool') {
-        const tcId = entry.tool_call_id;
-        if (tcId) {
-          for (let i = results.length - 1; i >= 0; i--) {
-            const tc = results[i].toolCalls.find((t) => t.callId === tcId);
-            if (tc) {
-              tc.result = entry.content ?? '';
-              tc.pending = false;
-              break;
-            }
-          }
-        }
-      }
-    }
-    return results;
-  }
 
   async function handleSend() {
     const text = inputText.trim();
-    if (!text || isLoading) return;
+    if (!text || s.inputDisabled) return;
 
-    messages.push({
-      id: genId(),
-      role: 'user',
-      content: text,
-      thinking: '',
-      toolCalls: [],
-      timestamp: Date.now(),
-      done: true,
-    });
+    if (text.startsWith('/')) {
+      executeSlashCommand(text.slice(1));
+      inputText = '';
+      showSlashMenu = false;
+      return;
+    }
 
+    s.addUserMessage(text);
     inputText = '';
-    isLoading = true;
-    scrollTick++;
-
+    showSlashMenu = false;
     await sendMessage(text);
-    await scrollToBottom();
   }
 
   async function handleApprove() {
-    if (!approval) return;
-    await approvePending();
-    approval = null;
+    s.clearApproval();
+    try { await approvePending(); } catch (e) { console.error('approve failed:', e); }
   }
 
-  async function handleApproveAlways() {
-    if (!approval) return;
-    await approveAlways(approval.tool_name, approval.tool_target ?? '', true);
-    approval = null;
+  async function handleApproveAlwaysSession() {
+    const { tool_name, tool_target } = s.approval!;
+    s.clearApproval();
+    try { await approveAlways(tool_name, tool_target ?? '*', false); } catch (e) { console.error('approve_always failed:', e); }
+  }
+
+  async function handleApproveAlwaysPersist() {
+    const { tool_name, tool_target } = s.approval!;
+    s.clearApproval();
+    try { await approveAlways(tool_name, tool_target ?? '*', true); } catch (e) { console.error('approve_always failed:', e); }
   }
 
   async function handleReject(feedback?: string) {
-    await rejectTool(feedback);
-    approval = null;
+    s.clearApproval();
+    try { await rejectTool(feedback); } catch (e) { console.error('reject failed:', e); }
+  }
+
+  function handleSlashSelect(cmd: { name: string }) {
+    inputText = `/${cmd.name} `;
+    showSlashMenu = false;
+  }
+
+  function handleSlashClose() {
+    showSlashMenu = false;
+    inputText = '';
+  }
+
+  function handleInputKeydown(e: KeyboardEvent) {
+    if (showSlashMenu) return;
+    if (s.approval) return;
+
+    if (e.key === 'Enter' && !e.shiftKey && e.keyCode !== 229) {
+      e.preventDefault();
+      handleSend();
+      return;
+    }
+
+    if (e.key === '/' && inputText === '') {
+      showSlashMenu = true;
+    }
+  }
+
+  function handleInputChange() {
+    if (inputText.startsWith('/') && inputText.length <= 20) {
+      showSlashMenu = true;
+    } else if (!inputText.startsWith('/')) {
+      showSlashMenu = false;
+    }
   }
 
   $effect(() => {
-    scrollTick;
-    if (listEl) scheduleScroll();
+    s.messages;
+    s.textBuffer;
+    s.thinkingBuffer;
+    if (listEl) scrollToBottom();
   });
-
-  let scrollPending = false;
-
-  function scheduleScroll() {
-    if (scrollPending) return;
-    scrollPending = true;
-    requestAnimationFrame(() => {
-      scrollPending = false;
-      if (listEl) {
-        listEl.scrollTop = listEl.scrollHeight;
-      }
-    });
-  }
 
   async function scrollToBottom() {
     await tick();
@@ -284,24 +120,87 @@
           <h1 class="text-[0.95rem] font-normal tracking-[0.2em]" style="color: var(--color-amber);">祈芷</h1>
           <span class="text-[0.75rem] tracking-[0.1em]" style="color: var(--color-ink-dark);">angelica</span>
         </div>
-        <StatusBar {fatigue} {statusText} {isLoading} />
+        <button
+          class="text-[0.7rem] tracking-[0.08em] transition-colors duration-200 hover:opacity-80"
+          style="color: var(--color-ink-dark); background: none; border: none; cursor: pointer;"
+          onclick={requestUsageStats}
+          title="Token 用量统计"
+        >
+          stats
+        </button>
       </div>
       <div class="header-line mt-4"></div>
     </div>
   </header>
 
   <div class="flex-1 overflow-y-auto" bind:this={listEl}>
-    <MessageList {messages} selectedId={null} />
+    <MessageList
+      messages={s.messages}
+      thinkingVisible={s.thinkingVisible}
+      thinkingBuffer={s.thinkingBuffer}
+      textBuffer={s.textBuffer}
+      isStreaming={s.isStreaming}
+    />
   </div>
 
-  {#if approval}
+  {#if s.approval}
     <ApprovalPanel
-      {approval}
+      approval={s.approval}
       onApprove={handleApprove}
-      onApproveAlways={handleApproveAlways}
+      onApproveAlwaysSession={handleApproveAlwaysSession}
+      onApproveAlwaysPersist={handleApproveAlwaysPersist}
       onReject={handleReject}
     />
   {/if}
 
-  <InputBar bind:text={inputText} {isLoading} onSend={handleSend} />
+  <div class="input-area">
+    {#if showSlashMenu}
+      <div class="slash-wrapper">
+        <SlashMenu
+          filter={inputText}
+          onSelect={handleSlashSelect}
+          onClose={handleSlashClose}
+        />
+      </div>
+    {/if}
+    <InputBar
+      bind:text={inputText}
+      disabled={s.inputDisabled}
+      onSend={handleSend}
+      onKeydown={handleInputKeydown}
+      onInputChange={handleInputChange}
+    />
+  </div>
+
+  <StatusBar
+    fatigue={s.fatigue}
+    fatigueDesc={s.fatigueDesc}
+    turns={s.fatigueTurns}
+    toolCalls={s.fatigueToolCalls}
+    statusText={s.statusText}
+    isStreaming={s.isStreaming}
+    modelName={s.modelName}
+    usage={s.usage}
+    thinkingVisible={s.thinkingVisible}
+    messageCount={s.messages.length}
+  />
+
+  {#if s.showUsageStats}
+    <UsageStats
+      sessions={s.usageSessions}
+      onClose={() => s.showUsageStats = false}
+    />
+  {/if}
 </div>
+
+<style>
+  .input-area {
+    position: relative;
+  }
+  .slash-wrapper {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 0 24px;
+    position: relative;
+  }
+</style>

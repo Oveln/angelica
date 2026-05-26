@@ -1,8 +1,9 @@
 use tokio::sync::mpsc;
 
 use super::Agent;
-use super::events::{AppEvent, HistoryEntry, UserAction};
+use super::events::{AppEvent, UserAction};
 use crate::agent::modes::AwakeMode;
+use crate::usage::{self, restore_current_usage};
 
 pub async fn run(
     config: crate::config::Config,
@@ -12,15 +13,16 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     let mut agent = Agent::<AwakeMode>::awake(config, debug_tx)?;
 
-    let init_messages: Vec<HistoryEntry> = agent
-        .history
-        .messages()
-        .iter()
-        .map(HistoryEntry::from)
-        .collect();
+    let entries = agent.history.to_display_entries();
+    let model_name = agent.config.llm.default_model_name().to_string();
+    let usage_stats_path = agent.config.state.data_dir().join("usage.jsonl");
+    let current_usage = restore_current_usage(&usage_stats_path);
+
     let _ = event_tx
         .send(AppEvent::Init {
-            messages: init_messages,
+            entries,
+            current_usage,
+            model_name: model_name.clone(),
         })
         .await;
 
@@ -35,7 +37,7 @@ pub async fn run(
 
     agent.emit_debug_snapshot();
 
-    run_loop(agent, &mut user_rx, &event_tx).await;
+    run_loop(agent, &mut user_rx, &event_tx, usage_stats_path, model_name).await;
 
     Ok(())
 }
@@ -44,6 +46,8 @@ async fn run_loop(
     mut agent: Agent<AwakeMode>,
     user_rx: &mut mpsc::Receiver<UserAction>,
     event_tx: &mpsc::Sender<AppEvent>,
+    usage_stats_path: std::path::PathBuf,
+    model_name: String,
 ) {
     while let Some(action) = user_rx.recv().await {
         match action {
@@ -113,6 +117,21 @@ async fn run_loop(
                     .reject_and_step(feedback.as_deref().unwrap_or(""), event_tx)
                     .await;
                 agent.save_if_dirty().await;
+            }
+            UserAction::UsageStats => {
+                let sessions = usage::load_session_summaries(&usage_stats_path);
+                let _ = event_tx.send(AppEvent::UsageStatsLoaded { sessions }).await;
+            }
+            UserAction::RequestInit => {
+                let entries = agent.history.to_display_entries();
+                let current_usage = restore_current_usage(&usage_stats_path);
+                let _ = event_tx
+                    .send(AppEvent::Init {
+                        entries,
+                        current_usage,
+                        model_name: model_name.clone(),
+                    })
+                    .await;
             }
             UserAction::Quit => {
                 break;

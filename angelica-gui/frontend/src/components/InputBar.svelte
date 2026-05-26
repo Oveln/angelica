@@ -1,39 +1,119 @@
 <script lang="ts">
-  let { text = $bindable(''), isLoading = false, onSend }: {
+  let {
+    text = $bindable(''),
+    disabled = false,
+    onSend,
+    onKeydown,
+    onInputChange,
+  }: {
     text: string;
-    isLoading: boolean;
+    disabled: boolean;
     onSend: () => void;
+    onKeydown: (e: KeyboardEvent) => void;
+    onInputChange: () => void;
   } = $props();
 
-  function handleKeydown(e: KeyboardEvent) {
-    // e.keyCode 229 = IME is processing this keystroke
-    if (e.key === 'Enter' && !e.shiftKey && e.keyCode !== 229) {
-      e.preventDefault();
-      onSend();
-    }
+  let textareaEl: HTMLTextAreaElement | undefined = $state();
+
+  function handleInput() {
+    if (!textareaEl) return;
+    textareaEl.style.height = 'auto';
+    textareaEl.style.height = Math.min(textareaEl.scrollHeight, 200) + 'px';
+    onInputChange();
   }
 </script>
 
-<div class="px-6 pb-5 pt-3">
-  <div class="max-w-2xl mx-auto">
+<div class="input-bar">
+  <div style="max-width: 640px; margin: 0 auto;">
     <textarea
-      class="w-full bg-transparent text-[1rem] placeholder-opacity-30 resize-none focus:outline-none"
-      style="color: var(--color-ink); border-bottom: 1px solid {text.trim() ? 'var(--color-amber-faint)' : 'var(--color-ink-dark)'}; padding: 0.5em 0; transition: border-color 0.3s;"
+      bind:this={textareaEl}
+      class="input-field"
       rows="1"
-      placeholder="说些什么..."
+      placeholder={disabled ? '' : '说些什么...  / 查看命令'}
       bind:value={text}
-      onkeydown={handleKeydown}
-      disabled={isLoading}
+      onkeydown={onKeydown}
+      oninput={handleInput}
+      {disabled}
     ></textarea>
-    <div class="flex justify-end mt-2">
-      <button
-        class="text-[0.75rem] tracking-[0.1em] transition-colors duration-200"
-        style="color: {isLoading || !text.trim() ? 'var(--color-ink-dark)' : 'var(--color-amber)'}; cursor: {isLoading || !text.trim() ? 'default' : 'pointer'};"
-        onclick={onSend}
-        disabled={isLoading || !text.trim()}
-      >
-        发送
-      </button>
-    </div>
+  </div>
+  <div class="input-footer">
+    <span class="input-hint">Shift+Enter 换行</span>
+    <button
+      class="send-btn"
+      class:disabled={disabled || !text.trim()}
+      onclick={onSend}
+      disabled={disabled || !text.trim()}
+    >
+      发送
+    </button>
   </div>
 </div>
+
+<style>
+  .input-bar {
+    padding: 8px 24px 16px;
+  }
+
+  .input-field {
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--color-ink-dark);
+    padding: 8px 0;
+    font-family: var(--font-serif);
+    font-size: 1rem;
+    color: var(--color-ink);
+    resize: none;
+    outline: none;
+    transition: border-color 0.3s, opacity 0.3s;
+    line-height: 1.6;
+  }
+
+  .input-field:focus {
+    border-bottom-color: var(--color-amber-faint);
+  }
+
+  .input-field:disabled {
+    opacity: 0.3;
+  }
+
+  .input-field::placeholder {
+    color: var(--color-ink-dark);
+  }
+
+  .input-footer {
+    max-width: 640px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+  }
+
+  .input-hint {
+    font-size: 0.6rem;
+    color: var(--color-ink-dark);
+    letter-spacing: 0.05em;
+  }
+
+  .send-btn {
+    font-family: var(--font-serif);
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    color: var(--color-amber);
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.2s;
+    padding: 4px 8px;
+  }
+
+  .send-btn:hover:not(.disabled) {
+    opacity: 0.8;
+  }
+
+  .send-btn.disabled {
+    color: var(--color-ink-dark);
+    cursor: default;
+  }
+</style>

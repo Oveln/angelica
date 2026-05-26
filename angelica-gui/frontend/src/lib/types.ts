@@ -1,21 +1,25 @@
-export interface Message {
+export interface ChatMessage {
+  type: 'chat';
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   thinking: string;
-  toolCalls: ToolCallInfo[];
   timestamp: number;
-  done: boolean;
 }
 
-export interface ToolCallInfo {
+export interface ToolMessage {
+  type: 'tool';
+  id: string;
   callId: string;
   name: string;
-  arguments: string;
+  display: string;
   result?: string;
   diffPreview?: string | null;
-  pending?: boolean;
+  pending: boolean;
+  timestamp: number;
 }
+
+export type Message = ChatMessage | ToolMessage;
 
 let nextId = 0;
 export function genId(): string {

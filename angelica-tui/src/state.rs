@@ -5,10 +5,9 @@ use ratatui::layout::Rect;
 use super::input::InputBuffer;
 use super::theme::Theme;
 use super::types::*;
+use angelica::agent::events::DisplayEntry;
 use angelica::llm::types::Role;
 use angelica::usage::UsageMetrics;
-
-// ── Sub-structs ──────────────────────────────────────
 
 pub struct FatigueState {
     pub fatigue: f64,
@@ -54,8 +53,6 @@ pub struct MouseState {
     pub mouse_down_pos: Option<(usize, usize)>,
     pub mouse_down_on_toggle: Option<(usize, usize)>,
 }
-
-// ── Scroll methods ───────────────────────────────────
 
 const TAIL_SENTINEL: usize = usize::MAX;
 
@@ -118,24 +115,19 @@ impl ScrollState {
     }
 }
 
-// ── AppState ─────────────────────────────────────────
-
 pub struct AppState {
-    // Core content
     pub messages: Vec<DisplayMessage>,
     pub thinking_buffer: String,
     pub text_buffer: String,
     pub input: InputBuffer,
     pub queued_messages: VecDeque<String>,
 
-    // Mode (carries mode-specific state)
     pub mode: crate::mode::AppMode,
     pub is_streaming: bool,
     pub should_quit: bool,
     pub model_name: String,
-    pub conversation_path: String,
+    pub pending_init: Option<(Vec<DisplayEntry>, Option<UsageMetrics>, String)>,
 
-    // Grouped state
     pub display: DisplayConfig,
     pub scroll: ScrollState,
     pub viewport: ViewportState,
@@ -144,7 +136,6 @@ pub struct AppState {
     pub usage: UsageMetrics,
     pub last_total_tokens: u64,
     pub last_response_usage: Option<UsageMetrics>,
-    pub usage_stats_path: std::path::PathBuf,
     pub cached_usage_sessions: Option<Vec<angelica::usage::SessionUsage>>,
 }
 
@@ -160,7 +151,7 @@ impl Default for AppState {
             is_streaming: false,
             should_quit: false,
             model_name: String::new(),
-            conversation_path: String::new(),
+            pending_init: None,
             display: DisplayConfig {
                 thinking_visible: true,
                 verbosity: Verbosity::Normal,
@@ -188,7 +179,6 @@ impl Default for AppState {
             usage: UsageMetrics::default(),
             last_total_tokens: 0,
             last_response_usage: None,
-            usage_stats_path: std::path::PathBuf::from("data/usage.jsonl"),
             cached_usage_sessions: None,
         }
     }
@@ -202,126 +192,54 @@ impl AppState {
         }
     }
 
-    pub fn with_conversation_path(mut self, path: String) -> Self {
-        self.usage_stats_path = std::path::PathBuf::from(&path)
-            .parent()
-            .map(|p| p.join("usage.jsonl"))
-            .unwrap_or_else(|| std::path::PathBuf::from("data/usage.jsonl"));
-        self.conversation_path = path;
-        self
-    }
-
-    pub fn load_conversation(&mut self) {
-        use crate::types::DisplayMessage;
-        use angelica::agent::history::History;
-
-        let path = std::path::PathBuf::from(&self.conversation_path);
-        if !path.exists() {
+    pub fn apply_pending_init(&mut self) {
+        let Some((entries, current_usage, model_name)) = self.pending_init.take() else {
             self.mode = crate::mode::AppMode::Chat;
             return;
+        };
+        if !model_name.is_empty() {
+            self.model_name = model_name;
         }
-
-        match History::load(path) {
-            Ok(history) => {
-                for msg in history.messages() {
-                    match msg.role {
-                        Role::User => {
-                            let raw = msg.content.as_deref().unwrap_or("");
-                            let content = strip_baked_context(raw);
-                            if content.is_empty() {
-                                continue;
-                            }
-                            self.messages.push(DisplayMessage::Chat {
-                                role: Role::User,
-                                content: content.to_string(),
-                                thinking: None,
-                                collapsed: false,
-                                hidden: false,
-                                token_usage: None,
-                            });
-                        }
-                        Role::Assistant => {
-                            let content = msg.content.as_deref().unwrap_or("");
-                            if content.is_empty() && msg.tool_calls.is_none() {
-                                continue;
-                            }
-                            if !content.is_empty() {
-                                self.messages.push(DisplayMessage::Chat {
-                                    role: Role::Assistant,
-                                    content: content.to_string(),
-                                    thinking: msg.reasoning_content.clone(),
-                                    collapsed: msg.reasoning_content.is_some(),
-                                    hidden: false,
-                                    token_usage: msg.usage,
-                                });
-                            }
-                            if let Some(tool_calls) = &msg.tool_calls {
-                                for tc in tool_calls {
-                                    let display = format!(
-                                        "{}({})",
-                                        tc.function.name,
-                                        truncate_args(&tc.function.arguments)
-                                    );
-                                    self.messages.push(DisplayMessage::Tool {
-                                        call_id: tc.id.clone(),
-                                        name: tc.function.name.clone(),
-                                        args_display: display,
-                                        result: None,
-                                        diff_preview: None,
-                                        collapsed: true,
-                                        hidden: false,
-                                    });
-                                }
-                            }
-                        }
-                        Role::Tool => {
-                            if let Some(DisplayMessage::Tool { result, .. }) = self
-                                .messages
-                                .iter_mut()
-                                .rev()
-                                .find(|m| matches!(m, DisplayMessage::Tool { call_id, .. } if *call_id == msg.tool_call_id.as_deref().unwrap_or("")))
-                            {
-                                *result = Some(
-                                    msg.content
-                                        .as_deref()
-                                        .unwrap_or("")
-                                        .chars()
-                                        .take(200)
-                                        .collect(),
-                                );
-                            }
-                        }
-                        _ => {}
-                    }
+        for entry in &entries {
+            match entry {
+                DisplayEntry::Chat {
+                    role,
+                    content,
+                    thinking,
+                } => {
+                    let r = match role {
+                        angelica::agent::events::DisplayRole::User => Role::User,
+                        angelica::agent::events::DisplayRole::Assistant => Role::Assistant,
+                        angelica::agent::events::DisplayRole::System => Role::System,
+                    };
+                    self.add_chat(r, content, thinking.clone());
                 }
-                self.scroll.to_bottom();
+                DisplayEntry::Tool {
+                    call_id,
+                    name,
+                    args_display,
+                    result,
+                    diff_preview,
+                } => {
+                    let force_collapsed = !self.should_show_tool_result(name);
+                    self.messages.push(DisplayMessage::Tool {
+                        call_id: call_id.clone(),
+                        name: name.clone(),
+                        args_display: args_display.clone(),
+                        result: result.clone(),
+                        diff_preview: diff_preview.clone(),
+                        collapsed: force_collapsed,
+                        hidden: false,
+                    });
+                }
             }
-            Err(e) => {
-                tracing::warn!("Failed to load conversation: {}", e);
-            }
+        }
+        self.scroll.to_bottom();
+        if let Some(usage) = current_usage {
+            self.usage = usage;
+            self.last_total_tokens = usage.total_tokens;
         }
         self.mode = crate::mode::AppMode::Chat;
-        self.restore_current_usage();
-    }
-
-    /// Restore usage from the latest awake session in usage.jsonl.
-    /// This ensures the sidebar persists across restarts within the same awake.
-    fn restore_current_usage(&mut self) {
-        let sessions = angelica::usage::load_session_summaries(&self.usage_stats_path);
-        // The last session is the current (incomplete) one
-        if let Some(last) = sessions.last()
-            && last.scope == angelica::usage::UsageScope::Awake
-        {
-            self.usage = UsageMetrics {
-                prompt_tokens: last.prompt_tokens,
-                completion_tokens: last.completion_tokens,
-                total_tokens: last.total_tokens,
-                reasoning_tokens: last.reasoning_tokens,
-                cache_hit_tokens: last.cache_hit_tokens,
-                cache_miss_tokens: last.cache_miss_tokens,
-            };
-            self.last_total_tokens = last.total_tokens;
-        }
     }
 
     pub fn theme(&self) -> &Theme {
@@ -401,41 +319,6 @@ impl AppState {
         }
     }
 
-    pub fn format_tool_args(&self, name: &str, arguments: &str) -> String {
-        match name {
-            "run_command" => {
-                let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
-                let cmd = args["command"].as_str().unwrap_or("?");
-                format!("$ {}", cmd)
-            }
-            "read_file" => {
-                let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
-                let path = args["path"].as_str().unwrap_or("?");
-                format!("read {}", path)
-            }
-            "write_file" => {
-                let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
-                let path = args["path"].as_str().unwrap_or("?");
-                format!("write {}", path)
-            }
-            "edit_file" => {
-                let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
-                let path = args["path"].as_str().unwrap_or("?");
-                if let Some(count) = args["count"].as_u64() {
-                    format!("edit {} ({} changes)", path, count)
-                } else {
-                    format!("edit {}", path)
-                }
-            }
-            "list_dir" => {
-                let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
-                let path = args["path"].as_str().unwrap_or(".");
-                format!("ls {}", path)
-            }
-            _ => name.to_string(),
-        }
-    }
-
     pub fn toggle_last_collapsed(&mut self) {
         for msg in self.messages.iter_mut().rev() {
             match msg {
@@ -474,15 +357,6 @@ fn find_tool_by_call_id_mut<'a>(
     })
 }
 
-fn truncate_args(args: &str) -> String {
-    let s: String = args.chars().take(60).collect();
-    if args.len() > 60 {
-        format!("{}...", s)
-    } else {
-        s
-    }
-}
-
 const QUIET_TOOLS: &[&str] = &[
     "read_file",
     "list_dir",
@@ -490,44 +364,3 @@ const QUIET_TOOLS: &[&str] = &[
     "edit_memory",
     "edit_profile",
 ];
-
-/// Strip the per-turn baked context from a user message.
-/// The baked prefix is separated from the actual user text by `\n\n`.
-fn strip_baked_context(content: &str) -> &str {
-    const MARKER: &str = "[以下是用户的输入]\n";
-    if let Some(pos) = content.find(MARKER) {
-        content[pos + MARKER.len()..].trim_start()
-    } else {
-        content
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn strip_context_basic() {
-        assert_eq!(
-            strip_baked_context(
-                "[以下为系统上下文，不是用户的输入]\n当前时间：2026-05-22\n你的状态：精神饱满。\n\n[以下是用户的输入]\n感觉如何"
-            ),
-            "感觉如何"
-        );
-    }
-
-    #[test]
-    fn no_double_newline_passthrough() {
-        assert_eq!(strip_baked_context("普通消息"), "普通消息");
-    }
-
-    #[test]
-    fn empty_after_strip() {
-        assert_eq!(
-            strip_baked_context(
-                "[以下为系统上下文，不是用户的输入]\n上下文\n\n[以下是用户的输入]\n"
-            ),
-            ""
-        );
-    }
-}

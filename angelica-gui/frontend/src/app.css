@@ -52,31 +52,6 @@ textarea {
   animation: fade-in 0.4s ease-out;
 }
 
-/* ── Turn separator ── */
-.turn-sep {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  margin: 2rem 0;
-}
-.turn-sep::before,
-.turn-sep::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(to right, transparent, rgba(200, 168, 130, 0.12), transparent);
-}
-.turn-sep::after {
-  background: linear-gradient(to left, transparent, rgba(200, 168, 130, 0.12), transparent);
-}
-.turn-sep-dot {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: rgba(200, 168, 130, 0.3);
-}
-
 /* ── Prose ── */
 .prose-ink {
   color: var(--color-ink);
