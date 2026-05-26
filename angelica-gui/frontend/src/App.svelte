@@ -41,6 +41,7 @@
     s.addUserMessage(text);
     inputText = '';
     showSlashMenu = false;
+    scrollToBottom();
     await sendMessage(text);
   }
 
