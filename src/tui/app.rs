@@ -9,6 +9,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io::{self, Write};
 use tokio::sync::mpsc;
 
+use crate::llm::types::Role;
 use crate::agent::events::{AppEvent, UserAction};
 use crate::tui::mode::{self, AppMode};
 use crate::tui::state::AppState;
@@ -54,7 +55,7 @@ pub async fn run_tui(
                         if matches!(event, AppEvent::TurnComplete)
                             && let Some(msg) = state.queued_messages.pop_front()
                         {
-                            state.add_chat("user", &msg, None);
+                            state.add_chat(Role::User, &msg, None);
                             let _ = user_action_tx.send(UserAction::SendMessage { content: msg }).await;
                         }
                     }

@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use ratatui::layout::Rect;
 
 use super::input::InputBuffer;
+use crate::llm::types::Role;
 use super::theme::Theme;
 use super::types::*;
 use crate::usage::UsageMetrics;
@@ -223,15 +224,15 @@ impl AppState {
         match History::load(path) {
             Ok(history) => {
                 for msg in history.messages() {
-                    match msg.role.as_str() {
-                        "user" => {
+                    match msg.role {
+                        Role::User => {
                             let raw = msg.content.as_deref().unwrap_or("");
                             let content = strip_baked_context(raw);
                             if content.is_empty() {
                                 continue;
                             }
                             self.messages.push(DisplayMessage::Chat {
-                                role: "user".to_string(),
+                                role: Role::User,
                                 content: content.to_string(),
                                 thinking: None,
                                 collapsed: false,
@@ -239,14 +240,14 @@ impl AppState {
                                 token_usage: None,
                             });
                         }
-                        "assistant" => {
+                        Role::Assistant => {
                             let content = msg.content.as_deref().unwrap_or("");
                             if content.is_empty() && msg.tool_calls.is_none() {
                                 continue;
                             }
                             if !content.is_empty() {
                                 self.messages.push(DisplayMessage::Chat {
-                                    role: "assistant".to_string(),
+                                    role: Role::Assistant,
                                     content: content.to_string(),
                                     thinking: msg.reasoning_content.clone(),
                                     collapsed: msg.reasoning_content.is_some(),
@@ -273,7 +274,7 @@ impl AppState {
                                 }
                             }
                         }
-                        "tool" => {
+                        Role::Tool => {
                             if let Some(DisplayMessage::Tool { result, .. }) = self
                                 .messages
                                 .iter_mut()
@@ -327,14 +328,14 @@ impl AppState {
         &self.display.theme
     }
 
-    pub fn add_chat(&mut self, role: &str, content: &str, thinking: Option<String>) {
-        let token_usage = if role == "assistant" {
+    pub fn add_chat(&mut self, role: Role, content: &str, thinking: Option<String>) {
+        let token_usage = if role == Role::Assistant {
             self.last_response_usage.take()
         } else {
             None
         };
         self.messages.push(DisplayMessage::Chat {
-            role: role.to_string(),
+            role,
             content: content.to_string(),
             thinking,
             collapsed: false,

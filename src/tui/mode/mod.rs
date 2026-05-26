@@ -7,6 +7,7 @@ pub use slash::{SlashAction, SlashMenuState};
 
 use tokio::sync::mpsc;
 
+use crate::llm::types::Role;
 use crate::agent::events::UserAction;
 use crate::tui::state::AppState;
 use crate::tui::types::{BUILTIN_COMMANDS, DisplayMessage};
@@ -107,7 +108,7 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
                         c.name, aliases, c.description
                     ));
                 }
-                state.add_chat("system", &help, None);
+                state.add_chat(Role::System, &help, None);
             }
             "quit" | "q" => {
                 state.should_quit = true;
@@ -116,7 +117,7 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
             "verbose" | "v" => {
                 state.display.verbosity = state.display.verbosity.cycle();
                 state.add_chat(
-                    "system",
+                    Role::System,
                     &format!("Verbosity: {}", state.display.verbosity.label()),
                     None,
                 );
@@ -124,7 +125,7 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
             "thinking" | "think" => {
                 state.display.thinking_visible = !state.display.thinking_visible;
                 state.add_chat(
-                    "system",
+                    Role::System,
                     &format!(
                         "Thinking display: {}",
                         if state.display.thinking_visible {
@@ -138,23 +139,23 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
             }
             "model" => {
                 let model = state.model_name.clone();
-                state.add_chat("system", &model, None);
+                state.add_chat(Role::System, &model, None);
             }
             "history" | "h" => {
                 let count = state.messages.len();
                 let user_count = state
                     .messages
                     .iter()
-                    .filter(|m| matches!(m, DisplayMessage::Chat { role, .. } if role == "user"))
+                    .filter(|m| matches!(m, DisplayMessage::Chat { role, .. } if *role == Role::User))
                     .count();
                 state.add_chat(
-                    "system",
+                    Role::System,
                     &format!("{} messages ({} user)", count, user_count),
                     None,
                 );
             }
             "sleep" => {
-                state.add_chat("system", "Falling asleep...", None);
+                state.add_chat(Role::System, "Falling asleep...", None);
                 let _ = tx.send(UserAction::ForceSleep).await;
             }
             "rebuild-embeddings" | "rebuild" => {
@@ -166,12 +167,12 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
                 state.mode = AppMode::UsageStats;
             }
             _ => {
-                state.add_chat("system", &format!("Unknown command: /{}", cmd_name), None);
+                state.add_chat(Role::System, &format!("Unknown command: /{}", cmd_name), None);
             }
         }
     } else {
         state.add_chat(
-            "system",
+            Role::System,
             &format!(
                 "Unknown command: /{}. Type /help for available commands.",
                 cmd_name

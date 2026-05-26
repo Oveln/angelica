@@ -108,33 +108,11 @@ impl History {
         tool_calls: Option<Vec<ToolCall>>,
         usage: Option<crate::usage::UsageMetrics>,
     ) {
-        let reasoning_content = if tool_calls.is_some() {
-            reasoning
-        } else {
-            None
-        };
-
-        self.push(ChatMessage {
-            role: "assistant".to_string(),
-            content,
-            reasoning_content,
-            tool_calls,
-            tool_call_id: None,
-            name: None,
-            usage,
-        });
+        self.push(ChatMessage::assistant(content, reasoning, tool_calls, usage));
     }
 
     pub fn record_tool_result(&mut self, tool_call_id: String, content: String) {
-        self.push(ChatMessage {
-            role: "tool".to_string(),
-            content: Some(content),
-            reasoning_content: None,
-            tool_calls: None,
-            tool_call_id: Some(tool_call_id),
-            name: None,
-            usage: None,
-        });
+        self.push(ChatMessage::tool_result(tool_call_id, content));
     }
 
     pub fn update_tool_result(&mut self, tc_id: &str, content: String) {
@@ -234,6 +212,7 @@ impl Drop for History {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::types::Role;
     use tempfile::TempDir;
 
     #[test]
@@ -243,24 +222,10 @@ mod tests {
 
         {
             let mut history = History::new(path.clone());
-            history.push(ChatMessage {
-                role: "user".to_string(),
-                content: Some("hello".to_string()),
-                reasoning_content: None,
-                tool_calls: None,
-                tool_call_id: None,
-                name: Some("user".to_string()),
-                usage: None,
-            });
-            history.push(ChatMessage {
-                role: "assistant".to_string(),
-                content: Some("hi".to_string()),
-                reasoning_content: None,
-                tool_calls: None,
-                tool_call_id: None,
-                name: None,
-                usage: None,
-            });
+            let mut user_msg = ChatMessage::user("hello");
+            user_msg.name = Some("user".to_string());
+            history.push(user_msg);
+            history.push(ChatMessage::assistant(Some("hi".to_string()), None, None, None));
         }
 
         let loaded = History::load(path).unwrap();
@@ -333,15 +298,7 @@ mod tests {
 
         {
             let mut history = History::new(path.clone());
-            history.push(ChatMessage {
-                role: "user".to_string(),
-                content: Some("hello".to_string()),
-                reasoning_content: None,
-                tool_calls: None,
-                tool_call_id: None,
-                name: None,
-                usage: None,
-            });
+            history.push(ChatMessage::user("hello"));
         }
         assert!(path.exists());
         assert!(std::fs::metadata(&path).unwrap().len() > 0);
@@ -361,7 +318,6 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut history = History::new(dir.path().join("conversation.jsonl"));
 
-        // Simulate the agent recording an error for malformed JSON arguments
         history.record_tool_result(
             "call_bad_json".to_string(),
             "Invalid JSON in tool call arguments: expected value at line 1 column 1".to_string(),
@@ -369,7 +325,7 @@ mod tests {
 
         assert_eq!(history.messages().len(), 1);
         let msg = &history.messages()[0];
-        assert_eq!(msg.role, "tool");
+        assert_eq!(msg.role, Role::Tool);
         assert_eq!(msg.tool_call_id.as_deref(), Some("call_bad_json"));
         assert!(msg.content.as_ref().unwrap().contains("Invalid JSON"));
     }
@@ -401,7 +357,6 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut history = History::new(dir.path().join("conversation.jsonl"));
 
-        // Pending approval
         history.record_tool_result(
             "call_approve".to_string(),
             "Pending user approval...".to_string(),
@@ -411,7 +366,6 @@ mod tests {
             Some("Pending user approval...")
         );
 
-        // Approved
         history.update_tool_result("call_approve", "File written successfully.".to_string());
         assert_eq!(
             history.messages()[0].content.as_deref(),
@@ -455,18 +409,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut history = History::new(dir.path().join("conversation.jsonl"));
 
-        // All edits in batch get pending status
         for id in ["tc_1", "tc_2", "tc_3"] {
             history.record_tool_result(id.to_string(), "Pending user approval...".to_string());
         }
 
-        // On approve, all get updated to same result
         let result = "3 edits applied to a.rs";
         for id in ["tc_1", "tc_2", "tc_3"] {
             history.update_tool_result(id, result.to_string());
         }
 
-        // All should have the approved result
         for msg in history.messages() {
             assert_eq!(msg.content.as_deref(), Some(result));
         }

@@ -1,5 +1,6 @@
 pub use crate::tui::mode::{AppMode, ApprovalChoice};
 
+use crate::llm::types::Role;
 use crate::usage::UsageMetrics;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,7 +86,7 @@ pub static BUILTIN_COMMANDS: &[SlashCommand] = &[
 #[derive(Debug, Clone)]
 pub enum DisplayMessage {
     Chat {
-        role: String,
+        role: Role,
         content: String,
         thinking: Option<String>,
         collapsed: bool,

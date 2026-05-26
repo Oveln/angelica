@@ -256,15 +256,9 @@ impl Agent<AwakeMode> {
     pub fn push_user_message(&mut self, content: &str) {
         let full_content = self.build_user_turn_content(content);
 
-        self.history.push(crate::llm::types::ChatMessage {
-            role: "user".to_string(),
-            content: Some(full_content),
-            reasoning_content: None,
-            tool_calls: None,
-            tool_call_id: None,
-            name: Some("user".to_string()),
-            usage: None,
-        });
+        let mut msg = crate::llm::types::ChatMessage::user(full_content);
+        msg.name = Some("user".to_string());
+        self.history.push(msg);
 
         self.dirty = true;
     }

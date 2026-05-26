@@ -91,9 +91,7 @@ pub async fn phase_consolidate(memory: &MemoryManager, llm: &LlmClient, transiti
     let current_self = memory.read_self();
     let current_profile = memory.read_user_profile();
 
-    let system_msg = ChatMessage {
-        role: "system".to_string(),
-        content: Some(
+    let system_msg = ChatMessage::system(
             "你是一个记忆分析系统。分析以下过往情景记忆，提炼出两类认知：
 1. 关于祈芷自身的认知（性格变化、新的自我理解、世界观调整等）
 2. 关于用户的认知（用户的偏好、习惯、情感状态、关系变化等）
@@ -103,29 +101,14 @@ pub async fn phase_consolidate(memory: &MemoryManager, llm: &LlmClient, transiti
 
 每条洞察应该是一句简洁的陈述句。如果某类没有新的认知，返回空数组。
 只输出 JSON，不要输出其他内容。"
-                .to_string(),
-        ),
-        reasoning_content: None,
-        tool_calls: None,
-        tool_call_id: None,
-        name: None,
-        usage: None,
-    };
+    );
 
     let user_content = format!(
         "## 当前 SELF.md\n{}\n\n## 当前用户画像\n{}\n\n## 需要分析的过往情景\n{}",
         current_self, current_profile, episode_text
     );
 
-    let user_msg = ChatMessage {
-        role: "user".to_string(),
-        content: Some(user_content),
-        reasoning_content: None,
-        tool_calls: None,
-        tool_call_id: None,
-        name: None,
-        usage: None,
-    };
+    let user_msg = ChatMessage::user(user_content);
 
     let options = RequestOptions {
         temperature: Some(0.3),
@@ -263,30 +246,14 @@ async fn compress_file(
     _file_name: &str,
     description: &str,
 ) -> Result<String> {
-    let system_msg = ChatMessage {
-        role: "system".to_string(),
-        content: Some(format!(
+    let system_msg = ChatMessage::system(format!(
             "你是一个文本压缩系统。以下内容是{}，已经超出了大小限制。
 请将其压缩到原来的一半左右，保留最核心和最重要的信息。
 保持 markdown 格式。只输出压缩后的内容，不要解释。",
             description
-        )),
-        reasoning_content: None,
-        tool_calls: None,
-        tool_call_id: None,
-        name: None,
-        usage: None,
-    };
+        ));
 
-    let user_msg = ChatMessage {
-        role: "user".to_string(),
-        content: Some(content.to_string()),
-        reasoning_content: None,
-        tool_calls: None,
-        tool_call_id: None,
-        name: None,
-        usage: None,
-    };
+    let user_msg = ChatMessage::user(content);
 
     let options = RequestOptions {
         temperature: Some(0.3),

@@ -72,15 +72,9 @@ impl PromptBuilder for AwakePromptBuilder {
 
         content = self.model_patch.apply_to_system_prompt(&content);
 
-        ChatMessage {
-            role: "system".to_string(),
-            content: Some(content),
-            reasoning_content: None,
-            tool_calls: None,
-            tool_call_id: None,
-            name: Some("context".to_string()),
-            usage: None,
-        }
+        let mut msg = ChatMessage::system(content);
+        msg.name = Some("context".to_string());
+        msg
     }
 }
 
@@ -154,14 +148,6 @@ profile 是关于用户的认知，会在沉淀阶段自动更新。
             profile,
         );
 
-        ChatMessage {
-            role: "system".to_string(),
-            content: Some(content),
-            reasoning_content: None,
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-            usage: None,
-        }
+        ChatMessage::system(content)
     }
 }

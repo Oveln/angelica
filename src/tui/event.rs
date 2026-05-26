@@ -1,3 +1,4 @@
+use crate::llm::types::Role;
 use crate::agent::events::AppEvent;
 
 use super::mode::AppMode;
@@ -28,7 +29,7 @@ impl AppState {
                 } else {
                     Some(std::mem::take(&mut self.thinking_buffer))
                 };
-                self.add_chat("assistant", full_text, thinking);
+                self.add_chat(Role::Assistant, full_text, thinking);
                 self.text_buffer.clear();
             }
             AppEvent::TurnComplete => {
@@ -56,7 +57,7 @@ impl AppState {
                         Some(std::mem::take(&mut self.thinking_buffer))
                     };
                     let text = std::mem::take(&mut self.text_buffer);
-                    self.add_chat("assistant", &text, thinking);
+                    self.add_chat(Role::Assistant, &text, thinking);
                 }
                 let display = self.format_tool_args(name, arguments);
                 self.add_tool_call(call_id.clone(), name.clone(), display);
@@ -106,7 +107,7 @@ impl AppState {
                 self.complete_tool(call_id, feedback.clone(), None, true);
             }
             AppEvent::Error { message } => {
-                self.add_chat("system", &format!("Error: {}", message), None);
+                self.add_chat(Role::System, &format!("Error: {}", message), None);
             }
             AppEvent::FatigueUpdate {
                 fatigue,
@@ -125,14 +126,14 @@ impl AppState {
                 self.usage = Default::default();
                 self.last_total_tokens = 0;
                 self.last_response_usage = None;
-                self.add_chat("system", "祈芷正在沉睡...", None);
+                self.add_chat(Role::System, "祈芷正在沉睡...", None);
             }
             AppEvent::Sleeping => {
                 self.is_streaming = false;
                 self.mode = AppMode::Chat;
             }
             AppEvent::WakingUp { dream: _ } => {
-                self.add_chat("system", "祈芷醒来了，梦的余韵还留在心头。", None);
+                self.add_chat(Role::System, "祈芷醒来了，梦的余韵还留在心头。", None);
             }
             AppEvent::UsageUpdate { record } => {
                 self.last_response_usage = Some(record.metrics);

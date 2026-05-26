@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 use super::Agent;
 use super::events::AppEvent;
 use super::modes::RunMode;
-use crate::llm::types::ChatMessage;
+use crate::llm::types::{ChatMessage, Role};
 use crate::llm::{LlmResponse, LlmStreamEvent, RequestOptions};
 use crate::usage::UsageRecord;
 
@@ -30,7 +30,7 @@ impl<S: RunMode> Agent<S> {
             context_messages: messages
                 .into_iter()
                 .map(|m| crate::debug::snapshot::ContextMessage {
-                    role: m.role.clone(),
+                    role: m.role.to_string(),
                     name: m.name.clone(),
                     content_length: m.content.as_ref().map(|c| c.chars().count()).unwrap_or(0),
                     content_preview: m.content.unwrap_or_default(),
@@ -102,7 +102,7 @@ impl<S: RunMode> Agent<S> {
         let history = self.history.messages();
         let has_system = history
             .iter()
-            .any(|m| m.role == "system");
+            .any(|m| m.role == Role::System);
         let mut messages = Vec::with_capacity(history.len() + usize::from(!has_system));
 
         if !has_system {

@@ -73,8 +73,13 @@ impl McpClient {
         .context(format!("timeout in initialize handshake with '{}'", name))?
         .context(format!("initialize failed for '{}'", name))?;
 
-        let _server_info: ServerInfo =
-            serde_json::from_value(init_result).context("invalid initialize response")?;
+        let _server_info: ServerInfo = serde_json::from_value(
+            init_result
+                .get("serverInfo")
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("initialize response missing 'serverInfo' field"))?,
+        )
+        .context("invalid initialize response")?;
 
         // Send initialized notification.
         transport
@@ -269,5 +274,60 @@ mod tests {
         let value = json!({ "some": "data" });
         let result = extract_tool_result(&value).unwrap();
         assert!(result.contains("some"));
+    }
+
+    fn mock_server_config() -> McpServerConfig {
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let script = std::path::Path::new(&manifest_dir)
+            .join("tests")
+            .join("mock_mcp_server.py");
+        McpServerConfig {
+            transport: "stdio".to_string(),
+            command: Some("python3".to_string()),
+            args: vec![script.to_str().unwrap().to_string()],
+            url: None,
+            env: std::collections::HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_handshake_and_tool_discovery() {
+        let config = mock_server_config();
+        let client = McpClient::connect("mock", &config)
+            .await
+            .expect("connect should succeed");
+
+        let specs = client.tool_specs();
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].function.name, "echo");
+        assert_eq!(specs[0].function.description.as_deref(), Some("Echo back the input"));
+
+        assert!(client.has_tool("echo"));
+        assert!(!client.has_tool("nonexistent"));
+    }
+
+    #[tokio::test]
+    async fn call_echo_tool() {
+        let config = mock_server_config();
+        let mut client = McpClient::connect("mock", &config)
+            .await
+            .expect("connect should succeed");
+
+        let result = client
+            .call_tool("echo", json!({"message": "hello world"}))
+            .await
+            .expect("call_tool should succeed");
+        assert_eq!(result, "hello world");
+    }
+
+    #[tokio::test]
+    async fn call_unknown_tool_returns_error() {
+        let config = mock_server_config();
+        let mut client = McpClient::connect("mock", &config)
+            .await
+            .expect("connect should succeed");
+
+        let result = client.call_tool("no_such_tool", json!({})).await;
+        assert!(result.is_err());
     }
 }

@@ -73,15 +73,7 @@ impl Agent<SleepingMode> {
 
         let data_dir = self.config.state.data_dir();
         let history_folder = data_dir.join("history").join(&snapshot_ts);
-        self.history.push(ChatMessage {
-            role: String::from("user"),
-            content: Some(String::from(" ")),
-            reasoning_content: None,
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-            usage: None,
-        });
+        self.history.push(ChatMessage::user(" "));
         let _ = event_tx.send(AppEvent::Sleeping).await;
 
         loop {

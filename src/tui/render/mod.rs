@@ -13,6 +13,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use unicode_width::UnicodeWidthStr;
 
+use crate::llm::types::Role;
+
 use super::state::AppState;
 use super::theme::{
     ASSISTANT_GLYPH, CARD_BOT, CARD_MID, CARD_TOP, THINKING_RAIL, TOOL_GLYPH, USER_GLYPH,
@@ -39,7 +41,7 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
     // Track the role of the previous message to control spacing.
     // Consecutive messages within the same "turn" (e.g. assistant + tool calls)
     // get less spacing than messages between different speakers.
-    let mut prev_role: Option<&str> = None;
+    let mut prev_role: Option<Role> = None;
 
     for (msg_idx, msg) in state.messages.iter().enumerate() {
         if msg.is_hidden() {
@@ -52,7 +54,7 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
         if !lines.is_empty() {
             match (prev_role, current_role) {
                 // Tool following an assistant — same turn, thin separator
-                (Some("assistant"), Some("tool")) | (Some("tool"), Some("tool")) => {
+                (Some(Role::Assistant), Some(Role::Tool)) | (Some(Role::Tool), Some(Role::Tool)) => {
                     lines.push(spacer());
                 }
                 // Otherwise — full break between speakers
@@ -72,8 +74,8 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
                 collapsed,
                 token_usage,
                 ..
-            } => match role.as_str() {
-                "user" => {
+            } => match role {
+                Role::User => {
                     lines.extend(glyph_lines(
                         content,
                         USER_GLYPH,
@@ -83,7 +85,7 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
                         terminal_width,
                     ));
                 }
-                "assistant" => {
+                Role::Assistant => {
                     render_assistant_message(
                         &mut lines,
                         state,
@@ -95,12 +97,10 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
                         lines.push(usage_line(usage, theme, terminal_width));
                     }
                 }
-                "system" => {
+                Role::System => {
                     render_system_message(&mut lines, content, *collapsed, theme, terminal_width);
                 }
-                _ => {
-                    lines.push(Line::from(content.clone()));
-                }
+                Role::Tool => {}
             },
             DisplayMessage::Tool {
                 args_display,
@@ -240,11 +240,11 @@ pub(super) fn build_all_lines(state: &AppState, terminal_width: usize) -> BuildR
 }
 
 /// Classify a message into a role category for spacing decisions.
-fn msg_role(msg: &DisplayMessage) -> Option<&str> {
+fn msg_role(msg: &DisplayMessage) -> Option<Role> {
     match msg {
-        DisplayMessage::Chat { role, .. } => Some(role.as_str()),
-        DisplayMessage::Tool { .. } => Some("tool"),
-        DisplayMessage::Diff { .. } => Some("diff"),
+        DisplayMessage::Chat { role, .. } => Some(*role),
+        DisplayMessage::Tool { .. } => Some(Role::Tool),
+        DisplayMessage::Diff { .. } => None  /* diff */,
     }
 }
 

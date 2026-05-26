@@ -1,6 +1,7 @@
 use super::Agent;
 use super::modes::RunMode;
 use crate::embedding;
+use crate::llm::types::Role;
 
 impl<S: RunMode> Agent<S> {
     /// After a turn completes, compute embedding from user input + assistant response
@@ -21,7 +22,7 @@ impl<S: RunMode> Agent<S> {
             .messages()
             .iter()
             .rev()
-            .find(|m| m.role == "user");
+            .find(|m| m.role == Role::User);
         let user_text = match user_msg.and_then(|m| m.content.as_ref()) {
             Some(t) => t.clone(),
             None => return,

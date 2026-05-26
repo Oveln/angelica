@@ -2,6 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::mpsc;
 
 use super::{AppMode, SlashMenuState, execute_slash_command};
+use crate::llm::types::Role;
 use crate::agent::events::UserAction;
 use crate::tui::state::AppState;
 
@@ -40,12 +41,12 @@ pub async fn handle_key(state: &mut AppState, key: KeyEvent, tx: &mpsc::Sender<U
             if state.is_streaming {
                 state.queued_messages.push_back(input.clone());
                 state.add_chat(
-                    "system",
+                    Role::System,
                     &format!("[queued: {}]", input.chars().take(40).collect::<String>()),
                     None,
                 );
             } else {
-                state.add_chat("user", &input, None);
+                state.add_chat(Role::User, &input, None);
                 let _ = tx.send(UserAction::SendMessage { content: input }).await;
             }
         }

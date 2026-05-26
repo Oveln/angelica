@@ -425,12 +425,12 @@ fn convert_tool_call(tc: GenaiToolCall) -> anyhow::Result<ToolCall> {
 }
 
 fn convert_message(msg: &ChatMessage) -> anyhow::Result<GenaiMessage> {
-    match msg.role.as_str() {
-        "system" => Ok(GenaiMessage::system(
+    match msg.role {
+        Role::System => Ok(GenaiMessage::system(
             msg.content.clone().unwrap_or_default(),
         )),
-        "user" => Ok(GenaiMessage::user(msg.content.clone().unwrap_or_default())),
-        "assistant" => {
+        Role::User => Ok(GenaiMessage::user(msg.content.clone().unwrap_or_default())),
+        Role::Assistant => {
             if let Some(tcs) = &msg.tool_calls {
                 let genai_tcs: Vec<GenaiToolCall> = tcs
                     .iter()
@@ -461,14 +461,13 @@ fn convert_message(msg: &ChatMessage) -> anyhow::Result<GenaiMessage> {
                 ))
             }
         }
-        "tool" => {
+        Role::Tool => {
             let response = ToolResponse::new(
                 msg.tool_call_id.clone().unwrap_or_default(),
                 msg.content.clone().unwrap_or_default(),
             );
             Ok(GenaiMessage::from(response))
         }
-        _ => Err(anyhow::anyhow!("Unknown message role: {}", msg.role)),
     }
 }
 
