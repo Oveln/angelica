@@ -1,0 +1,4 @@
+[alias]
+tui = "run -p xtask -- tui"
+gui = "run -p xtask -- gui"
+ck = "run -p xtask -- check"

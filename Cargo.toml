@@ -56,6 +56,7 @@ members = [
     ".",                        # angelica (core lib)
     "angelica-tui",             # TUI frontend (lib + binary)
     "angelica-gui/src-tauri",   # Tauri GUI binary
+    "xtask",                    # dev task runner
 ]
 
 [workspace.package]
