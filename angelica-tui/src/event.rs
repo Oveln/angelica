@@ -131,10 +131,10 @@ impl AppState {
             AppEvent::WakingUp { dream: _ } => {
                 self.add_chat(Role::System, "祈芷醒来了，梦的余韵还留在心头。", None);
             }
-            AppEvent::UsageUpdate { record } => {
-                self.last_response_usage = Some(record.metrics);
-                self.usage.accumulate(&record.metrics);
-                self.last_total_tokens = record.metrics.total_tokens;
+            AppEvent::UsageUpdate { metrics } => {
+                self.last_response_usage = Some(*metrics);
+                self.usage.accumulate(metrics);
+                self.last_total_tokens = metrics.total_tokens;
             }
             AppEvent::UsageStatsLoaded { sessions } => {
                 self.cached_usage_sessions = Some(sessions.clone());

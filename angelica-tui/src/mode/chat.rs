@@ -47,6 +47,7 @@ pub async fn handle_key(state: &mut AppState, key: KeyEvent, tx: &mpsc::Sender<U
                 );
             } else {
                 state.add_chat(Role::User, &input, None);
+                state.scroll.to_bottom();
                 let _ = tx.send(UserAction::SendMessage { content: input }).await;
             }
         }

@@ -78,11 +78,6 @@
     animation: pulse 1.5s ease-in-out infinite;
   }
 
-  @keyframes pulse {
-    0%, 100% { opacity: 0.3; }
-    50% { opacity: 1; }
-  }
-
   .tool-done {
     color: #5a9e6f;
     font-size: 0.65rem;

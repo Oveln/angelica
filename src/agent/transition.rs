@@ -122,7 +122,7 @@ impl Agent<SleepingMode> {
             tracing::error!("Failed to commit sleep data: {}", e);
         }
 
-        let mut awake = self.transition_to_awake(dream);
+        let mut awake = self.transition_to_awake(dream).await;
 
         if let Err(e) = awake.initialize().await {
             tracing::error!("Failed to initialize agent after sleep: {}", e);
@@ -143,21 +143,26 @@ impl Agent<SleepingMode> {
         awake
     }
 
-    fn transition_to_awake(self, dream: Option<String>) -> Agent<AwakeMode> {
+    async fn transition_to_awake(self, dream: Option<String>) -> Agent<AwakeMode> {
         {
             let state_path = std::path::PathBuf::from(&self.config.state.path);
-            if state_path.exists()
-                && let Err(e) = std::fs::remove_file(&state_path)
-            {
-                tracing::error!("Failed to remove state file: {}", e);
-            }
+            let conversation_path =
+                std::path::PathBuf::from(&self.config.state.conversation_path);
 
-            let conversation_path = std::path::PathBuf::from(&self.config.state.conversation_path);
-            if conversation_path.exists()
-                && let Err(e) = std::fs::write(&conversation_path, "")
-            {
-                tracing::error!("Failed to clear conversation history: {}", e);
-            }
+            tokio::task::spawn_blocking(move || {
+                if state_path.exists()
+                    && let Err(e) = std::fs::remove_file(&state_path)
+                {
+                    tracing::error!("Failed to remove state file: {}", e);
+                }
+                if conversation_path.exists()
+                    && let Err(e) = std::fs::write(&conversation_path, "")
+                {
+                    tracing::error!("Failed to clear conversation history: {}", e);
+                }
+            })
+            .await
+            .ok();
         }
 
         let awake = AwakeMode::build(

@@ -55,6 +55,7 @@ pub async fn run_tui(
                             && let Some(msg) = state.queued_messages.pop_front()
                         {
                             state.add_chat(Role::User, &msg, None);
+                            state.scroll.to_bottom();
                             let _ = user_action_tx.send(UserAction::SendMessage { content: msg }).await;
                         }
                     }

@@ -29,6 +29,9 @@ regex = "1"
 # Chrono for timestamps
 chrono = "0.4"
 
+# TS type generation
+ts-rs = { version = "12", features = ["serde-compat"] }
+
 # Logging
 tracing = "0.1"
 

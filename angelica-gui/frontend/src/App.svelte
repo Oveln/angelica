@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount } from 'svelte';
   import {
     sendMessage,
     approvePending,
@@ -103,12 +103,14 @@
     s.messages;
     s.textBuffer;
     s.thinkingBuffer;
-    if (listEl) scrollToBottom();
+    scrollToBottom();
   });
 
-  async function scrollToBottom() {
-    await tick();
-    if (listEl) listEl.scrollTop = listEl.scrollHeight;
+  function scrollToBottom() {
+    if (!listEl) return;
+    requestAnimationFrame(() => {
+      if (listEl) listEl.scrollTop = listEl.scrollHeight;
+    });
   }
 </script>
 

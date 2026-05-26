@@ -3,6 +3,8 @@ pub use crate::mode::{AppMode, ApprovalChoice};
 use angelica::llm::types::Role;
 use angelica::usage::UsageMetrics;
 
+pub use angelica::agent::events::SlashCommand;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verbosity {
     Normal,
@@ -26,13 +28,6 @@ impl Verbosity {
             Verbosity::Trace => Verbosity::Normal,
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct SlashCommand {
-    pub name: &'static str,
-    pub aliases: &'static [&'static str],
-    pub description: &'static str,
 }
 
 pub static BUILTIN_COMMANDS: &[SlashCommand] = &[

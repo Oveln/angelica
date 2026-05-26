@@ -114,21 +114,6 @@ pub fn run() {
         }
     }
 
-    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-    let rt_handle = rt.handle().clone();
-
-    tracing::info!("Starting agent thread...");
-    let agent_config = config;
-    let agent_handle = std::thread::spawn(move || {
-        rt.block_on(async {
-            if let Err(e) =
-                angelica::agent::run(agent_config, user_action_rx, app_event_tx, None).await
-            {
-                tracing::error!("Agent error: {}", e);
-            }
-        })
-    });
-
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(AppState {
@@ -147,18 +132,25 @@ pub fn run() {
                 });
             }
 
-            let rt = rt_handle;
-            std::thread::spawn(move || {
-                rt.block_on(async {
-                    tracing::info!("Event bridge started");
-                    while let Some(event) = app_event_rx.recv().await {
-                        let (event_name, payload) = serialize_event(&event);
-                        tracing::debug!("Emitting: {}", event_name);
-                        let _ = app_handle.emit(event_name, payload);
-                    }
-                    tracing::info!("Event bridge ended");
-                })
+            tauri::async_runtime::spawn(async move {
+                tracing::info!("Event bridge started");
+                while let Some(event) = app_event_rx.recv().await {
+                    let (event_name, payload) = serialize_event(&event);
+                    tracing::debug!("Emitting: {}", event_name);
+                    let _ = app_handle.emit(event_name, payload);
+                }
+                tracing::info!("Event bridge ended");
             });
+
+            tauri::async_runtime::spawn(async move {
+                tracing::info!("Agent started");
+                if let Err(e) =
+                    angelica::agent::run(config, user_action_rx, app_event_tx, None).await
+                {
+                    tracing::error!("Agent error: {}", e);
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -174,8 +166,6 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-
-    let _ = agent_handle.join();
 }
 
 fn init_logging() {
@@ -224,49 +214,73 @@ fn show_fatal_dialog(message: &str) {
 }
 
 fn serialize_event(event: &AppEvent) -> (&'static str, serde_json::Value) {
+    use angelica::agent::events::{
+        ApprovalPendingPayload, ErrorPayload, FatigueUpdatePayload, InitPayload,
+        TextDeltaPayload, TextDonePayload, ThinkingDeltaPayload, ToolCallingPayload,
+        ToolRejectedPayload, ToolResultPayload, UsageStatsLoadedPayload, UsageUpdatePayload,
+        WakingUpPayload,
+    };
+
     match event {
         AppEvent::Init {
             entries,
             current_usage,
             model_name,
-        } => (
-            "init",
-            serde_json::json!({
-                "entries": entries,
-                "current_usage": current_usage,
-                "model_name": model_name,
-            }),
-        ),
-        AppEvent::ThinkingDelta { delta } => {
-            ("thinking-delta", serde_json::json!({ "delta": delta }))
+        } => {
+            let payload = serde_json::to_value(InitPayload {
+                entries: entries.clone(),
+                current_usage: *current_usage,
+                model_name: model_name.clone(),
+            })
+            .expect("serialize init payload");
+            ("init", payload)
         }
-        AppEvent::TextDelta { delta } => ("text-delta", serde_json::json!({ "delta": delta })),
+        AppEvent::ThinkingDelta { delta } => {
+            let payload = serde_json::to_value(ThinkingDeltaPayload { delta: delta.clone() })
+                .expect("serialize thinking-delta payload");
+            ("thinking-delta", payload)
+        }
+        AppEvent::TextDelta { delta } => {
+            let payload = serde_json::to_value(TextDeltaPayload { delta: delta.clone() })
+                .expect("serialize text-delta payload");
+            ("text-delta", payload)
+        }
         AppEvent::TextDone { full_text } => {
-            ("text-done", serde_json::json!({ "full_text": full_text }))
+            let payload = serde_json::to_value(TextDonePayload {
+                full_text: full_text.clone(),
+            })
+            .expect("serialize text-done payload");
+            ("text-done", payload)
         }
         AppEvent::TurnComplete => ("turn-complete", serde_json::json!({})),
         AppEvent::ToolCalling {
             call_id,
             name,
             display,
-        } => (
-            "tool-calling",
-            serde_json::json!({ "call_id": call_id, "name": name, "display": display }),
-        ),
+        } => {
+            let payload = serde_json::to_value(ToolCallingPayload {
+                call_id: call_id.clone(),
+                name: name.clone(),
+                display: display.clone(),
+            })
+            .expect("serialize tool-calling payload");
+            ("tool-calling", payload)
+        }
         AppEvent::ToolResult {
             call_id,
             name,
             result,
             diff_preview,
-        } => (
-            "tool-result",
-            serde_json::json!({
-                "call_id": call_id,
-                "name": name,
-                "result": result,
-                "diff_preview": diff_preview,
-            }),
-        ),
+        } => {
+            let payload = serde_json::to_value(ToolResultPayload {
+                call_id: call_id.clone(),
+                name: name.clone(),
+                result: result.clone(),
+                diff_preview: diff_preview.clone(),
+            })
+            .expect("serialize tool-result payload");
+            ("tool-result", payload)
+        }
         AppEvent::ApprovalPending {
             call_id,
             tool_name,
@@ -274,45 +288,68 @@ fn serialize_event(event: &AppEvent) -> (&'static str, serde_json::Value) {
             preview,
             tool_label,
             is_diff,
-        } => (
-            "approval-pending",
-            serde_json::json!({
-                "call_id": call_id,
-                "tool_name": tool_name,
-                "tool_target": tool_target,
-                "preview": preview,
-                "tool_label": tool_label,
-                "is_diff": is_diff,
-            }),
-        ),
-        AppEvent::ToolRejected { call_id, feedback } => (
-            "tool-rejected",
-            serde_json::json!({ "call_id": call_id, "feedback": feedback }),
-        ),
-        AppEvent::Error { message } => ("error", serde_json::json!({ "message": message })),
+        } => {
+            let payload = serde_json::to_value(ApprovalPendingPayload {
+                call_id: call_id.clone(),
+                tool_name: tool_name.clone(),
+                tool_target: tool_target.clone(),
+                preview: preview.clone(),
+                tool_label: tool_label.clone(),
+                is_diff: *is_diff,
+            })
+            .expect("serialize approval-pending payload");
+            ("approval-pending", payload)
+        }
+        AppEvent::ToolRejected { call_id, feedback } => {
+            let payload = serde_json::to_value(ToolRejectedPayload {
+                call_id: call_id.clone(),
+                feedback: feedback.clone(),
+            })
+            .expect("serialize tool-rejected payload");
+            ("tool-rejected", payload)
+        }
+        AppEvent::Error { message } => {
+            let payload = serde_json::to_value(ErrorPayload {
+                message: message.clone(),
+            })
+            .expect("serialize error payload");
+            ("error", payload)
+        }
         AppEvent::FatigueUpdate {
             fatigue,
             turns,
             tool_calls,
             desc,
-        } => (
-            "fatigue-update",
-            serde_json::json!({
-                "fatigue": fatigue,
-                "turns": turns,
-                "tool_calls": tool_calls,
-                "desc": desc,
-            }),
-        ),
-        AppEvent::UsageUpdate { record } => {
-            ("usage-update", serde_json::json!({ "record": record.metrics }))
+        } => {
+            let payload = serde_json::to_value(FatigueUpdatePayload {
+                fatigue: *fatigue,
+                turns: *turns,
+                tool_calls: *tool_calls,
+                desc: desc.clone(),
+            })
+            .expect("serialize fatigue-update payload");
+            ("fatigue-update", payload)
         }
-        AppEvent::UsageStatsLoaded { sessions } => (
-            "usage-stats-loaded",
-            serde_json::json!({ "sessions": sessions }),
-        ),
+        AppEvent::UsageUpdate { metrics } => {
+            let payload = serde_json::to_value(UsageUpdatePayload { metrics: *metrics })
+                .expect("serialize usage-update payload");
+            ("usage-update", payload)
+        }
+        AppEvent::UsageStatsLoaded { sessions } => {
+            let payload = serde_json::to_value(UsageStatsLoadedPayload {
+                sessions: sessions.clone(),
+            })
+            .expect("serialize usage-stats-loaded payload");
+            ("usage-stats-loaded", payload)
+        }
         AppEvent::FallingAsleep => ("falling-asleep", serde_json::json!({})),
         AppEvent::Sleeping => ("sleeping", serde_json::json!({})),
-        AppEvent::WakingUp { dream } => ("waking-up", serde_json::json!({ "dream": dream })),
+        AppEvent::WakingUp { dream } => {
+            let payload = serde_json::to_value(WakingUpPayload {
+                dream: dream.clone(),
+            })
+            .expect("serialize waking-up payload");
+            ("waking-up", payload)
+        }
     }
 }

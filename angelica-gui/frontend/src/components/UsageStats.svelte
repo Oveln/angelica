@@ -133,12 +133,7 @@
     align-items: center;
     justify-content: center;
     z-index: 100;
-    animation: fade-in 0.2s ease-out;
-  }
-
-  @keyframes fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    animation: fade-in-simple 0.2s ease-out;
   }
 
   .modal {

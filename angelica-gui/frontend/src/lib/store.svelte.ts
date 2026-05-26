@@ -199,7 +199,7 @@ async function init() {
   });
 
   await listenTo('usage-update', (p: UsageUpdate) => {
-    usage = p.record;
+    usage = p.metrics;
   });
 
   await listenTo('usage-stats-loaded', (p) => {

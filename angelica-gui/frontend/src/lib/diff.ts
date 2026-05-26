@@ -1,3 +1,5 @@
+import { escapeHtml } from './html';
+
 export function renderDiff(text: string): string {
   const lines = text.split('\n');
   return lines
@@ -21,13 +23,6 @@ export function renderDiff(text: string): string {
       return `<span class="diff-ctx">${escaped}</span>`;
     })
     .join('\n');
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
 }
 
 export function isDiffContent(text: string): boolean {

@@ -1,4 +1,5 @@
 import { marked } from 'marked';
+import { escapeHtml } from './html';
 import hljs from 'highlight.js/lib/core';
 import rust from 'highlight.js/lib/languages/rust';
 import ts from 'highlight.js/lib/languages/typescript';
@@ -45,14 +46,6 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
 };
 
 marked.use({ renderer });
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 export function renderMarkdown(text: string): string {
   return marked.parse(text) as string;

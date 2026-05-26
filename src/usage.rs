@@ -1,5 +1,6 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "api-generated.ts")]
 pub enum UsageScope {
     #[default]
     Awake,
@@ -15,7 +16,8 @@ impl UsageScope {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "api-generated.ts")]
 pub struct UsageMetrics {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
@@ -76,7 +78,8 @@ impl UsageRecord {
 }
 
 /// A single session's aggregated usage (one awake or sleep cycle).
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "api-generated.ts")]
 pub struct SessionUsage {
     pub scope: UsageScope,
     pub start_time: String,

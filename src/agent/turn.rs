@@ -128,7 +128,7 @@ impl<S: RunMode> Agent<S> {
         tokio::task::spawn_blocking(move || {
             append_usage_record(&data_dir, &disk_record);
         });
-        let _ = event_tx.send(AppEvent::UsageUpdate { record }).await;
+        let _ = event_tx.send(AppEvent::UsageUpdate { metrics }).await;
     }
 }
 

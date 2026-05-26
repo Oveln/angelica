@@ -73,15 +73,10 @@
   }
 
   .msg-enter {
-    animation: fade-in 0.3s ease-out;
+    animation: fade-in-simple 0.3s ease-out;
   }
 
   .tool-enter {
-    animation: fade-in 0.2s ease-out;
-  }
-
-  @keyframes fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    animation: fade-in-simple 0.2s ease-out;
   }
 </style>

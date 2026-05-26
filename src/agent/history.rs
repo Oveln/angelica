@@ -79,6 +79,7 @@ impl History {
 
     pub fn push(&mut self, msg: ChatMessage) {
         self.append_to_file(&msg);
+        self.flush();
         self.messages.push(msg);
     }
 
