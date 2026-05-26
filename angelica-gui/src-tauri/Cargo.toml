@@ -1,0 +1,19 @@
+[package]
+name = "angelica-gui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+angelica = { path = "../.." }
+tokio = { version = "1", features = ["full"] }
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+dirs.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

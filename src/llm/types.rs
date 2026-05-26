@@ -26,11 +26,47 @@ impl std::fmt::Display for Role {
     }
 }
 
+/// Per-turn runtime context injected into user messages.
+/// Stored as structured data; rendered to text only when building
+/// the prompt for the LLM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Context {
+    pub time: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fatigue: Option<String>,
+    pub turns: u32,
+    pub tool_calls: u32,
+    pub has_dream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recall: Option<String>,
+}
+
+impl std::fmt::Display for Context {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "当前时间：{}", self.time)?;
+        if let Some(ref fatigue) = self.fatigue {
+            write!(f, "\n你的状态：{}", fatigue)?;
+        }
+        if self.turns > 0 {
+            write!(f, "\n本轮对话 {} 轮，使用 {} 次工具", self.turns, self.tool_calls)?;
+        }
+        if self.has_dream {
+            write!(f, "\n你刚从梦中醒来，梦中的感受还隐约残留。")?;
+        }
+        if let Some(ref recall) = self.recall {
+            write!(f, "\n唤起的记忆：\n{}", recall)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: Role,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<Context>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,6 +84,7 @@ impl ChatMessage {
         Self {
             role: Role::System,
             content: Some(content.into()),
+            context: None,
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
@@ -60,6 +97,20 @@ impl ChatMessage {
         Self {
             role: Role::User,
             content: Some(content.into()),
+            context: None,
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+            usage: None,
+        }
+    }
+
+    pub fn user_with_context(content: impl Into<String>, context: Option<Context>) -> Self {
+        Self {
+            role: Role::User,
+            content: Some(content.into()),
+            context,
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
@@ -82,6 +133,7 @@ impl ChatMessage {
         Self {
             role: Role::Assistant,
             content,
+            context: None,
             reasoning_content,
             tool_calls,
             tool_call_id: None,
@@ -94,6 +146,7 @@ impl ChatMessage {
         Self {
             role: Role::Tool,
             content: Some(content.into()),
+            context: None,
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: Some(tool_call_id.into()),

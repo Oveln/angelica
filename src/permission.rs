@@ -11,12 +11,6 @@ pub enum PermissionAction {
     Deny,
 }
 
-impl PermissionAction {
-    fn default_ask() -> Self {
-        PermissionAction::Ask
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct TargetRule {
     pub target: String,
@@ -44,7 +38,7 @@ pub struct ToolRuleEntry {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PermissionConfig {
-    #[serde(default = "PermissionAction::default_ask")]
+    #[serde(default)]
     pub default: PermissionAction,
     #[serde(default)]
     pub tools: Vec<ToolRuleEntry>,

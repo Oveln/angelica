@@ -56,11 +56,18 @@ impl FatigueModel {
         self.tool_calls += count;
     }
 
-    pub fn with_persisted(mut self, fatigue: f64, turns: u32, tool_calls: u32) -> Self {
-        self.fatigue = fatigue;
-        self.turns = turns;
-        self.tool_calls = tool_calls;
-        self
+    pub(crate) fn from_persist(p: &FatiguePersist) -> Self {
+        Self {
+            fatigue: p.fatigue,
+            turns: p.turns,
+            tool_calls: p.tool_calls,
+            groggy_turns: 0,
+            max_context_tokens: 1,
+            curve_exponent: 1.0,
+            sleep_threshold: 0.0,
+            can_sleep_threshold: 0.0,
+            groggy_turns_on_wake: 0,
+        }
     }
 
     pub fn on_wake(&mut self) {
@@ -108,9 +115,8 @@ impl FatigueModel {
     }
 }
 
-// Only persist the meaningful fields; runtime fields come from config on load.
 #[derive(Serialize, Deserialize)]
-struct FatiguePersist {
+pub(crate) struct FatiguePersist {
     #[serde(
         serialize_with = "serialize_fatigue_f64",
         deserialize_with = "deserialize_fatigue_f64"
@@ -137,23 +143,6 @@ impl Serialize for FatigueModel {
             tool_calls: self.tool_calls,
         }
         .serialize(s)
-    }
-}
-
-impl<'de> Deserialize<'de> for FatigueModel {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let p = FatiguePersist::deserialize(d)?;
-        Ok(FatigueModel {
-            fatigue: p.fatigue,
-            turns: p.turns,
-            tool_calls: p.tool_calls,
-            groggy_turns: 0,
-            max_context_tokens: 120_000,
-            curve_exponent: 1.0,
-            sleep_threshold: 0.85,
-            can_sleep_threshold: 0.6,
-            groggy_turns_on_wake: 3,
-        })
     }
 }
 
@@ -314,7 +303,8 @@ mod tests {
         model.on_turn();
         model.add_tool_calls(2);
         let json = serde_json::to_string(&model).unwrap();
-        let restored: FatigueModel = serde_json::from_str(&json).unwrap();
+        let persist: FatiguePersist = serde_json::from_str(&json).unwrap();
+        let restored = FatigueModel::from_persist(&persist);
         assert!((restored.fatigue() - model.fatigue()).abs() < 1e-4);
         assert_eq!(restored.turns(), model.turns());
         assert_eq!(restored.tool_calls(), model.tool_calls());

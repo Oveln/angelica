@@ -51,6 +51,37 @@ impl Config {
         Ok(toml::from_str(s)?)
     }
 
+    pub fn load_or_create(cli_path: Option<PathBuf>) -> anyhow::Result<Self> {
+        let config_path = match cli_path {
+            Some(ref path) => {
+                let abs = if path.is_absolute() {
+                    path.clone()
+                } else {
+                    std::env::current_dir()?.join(path)
+                };
+                let mut cfg = Self::from_file(&abs)?;
+                cfg.resolve_paths();
+                return Ok(cfg);
+            }
+            None => config_path(),
+        };
+
+        if config_path.exists() {
+            let mut cfg = Self::from_file(&config_path)?;
+            cfg.resolve_paths();
+            Ok(cfg)
+        } else {
+            if let Some(parent) = config_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut cfg = Self::default();
+            std::fs::write(&config_path, toml::to_string_pretty(&cfg)?)?;
+            tracing::info!("Created default config at {}", config_path.display());
+            cfg.resolve_paths();
+            Ok(cfg)
+        }
+    }
+
     pub fn resolve_paths(&mut self) {
         let base = data_dir();
         self.memory.episodes_path = Self::absolute_or(&base, &self.memory.episodes_path);

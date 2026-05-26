@@ -140,6 +140,9 @@ impl AppState {
                 self.usage.accumulate(&record.metrics);
                 self.last_total_tokens = record.metrics.total_tokens;
             }
+            AppEvent::Init { .. } => {
+                // TUI loads conversation independently via load_conversation()
+            }
         }
     }
 }

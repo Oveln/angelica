@@ -429,7 +429,17 @@ fn convert_message(msg: &ChatMessage) -> anyhow::Result<GenaiMessage> {
         Role::System => Ok(GenaiMessage::system(
             msg.content.clone().unwrap_or_default(),
         )),
-        Role::User => Ok(GenaiMessage::user(msg.content.clone().unwrap_or_default())),
+        Role::User => {
+            let effective = match &msg.context {
+                Some(ctx) => format!(
+                    "[以下为系统上下文，不是用户的输入]\n{}\n\n[以下是用户的输入]\n{}",
+                    ctx,
+                    msg.content.as_deref().unwrap_or_default()
+                ),
+                None => msg.content.clone().unwrap_or_default(),
+            };
+            Ok(GenaiMessage::user(effective))
+        }
         Role::Assistant => {
             if let Some(tcs) = &msg.tool_calls {
                 let genai_tcs: Vec<GenaiToolCall> = tcs

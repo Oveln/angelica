@@ -125,17 +125,16 @@ impl<S: RunMode> Agent<S> {
 
         let scope = self.run_state.usage_scope();
         let record = UsageRecord::new(scope, self.iteration, context_messages, metrics);
-        let config = self.config.clone();
+        let data_dir = self.config.state.data_dir();
         let disk_record = record.clone();
         tokio::task::spawn_blocking(move || {
-            append_usage_record(&config, &disk_record);
+            append_usage_record(&data_dir, &disk_record);
         });
         let _ = event_tx.send(AppEvent::UsageUpdate { record }).await;
     }
 }
 
-fn append_usage_record(config: &crate::config::Config, record: &UsageRecord) {
-    let data_dir = config.state.data_dir();
+fn append_usage_record(data_dir: &std::path::Path, record: &UsageRecord) {
     let path = data_dir.join("usage.jsonl");
 
     if let Some(parent) = path.parent()

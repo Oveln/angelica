@@ -1,5 +1,8 @@
 #[derive(Debug, Clone)]
 pub enum AppEvent {
+    Init {
+        messages: Vec<HistoryEntry>,
+    },
     ThinkingDelta {
         delta: String,
     },
@@ -73,4 +76,35 @@ pub enum UserAction {
     ForceSleep,
     RebuildEmbeddings,
     Quit,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HistoryEntry {
+    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<crate::llm::types::Context>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<crate::llm::types::ToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl From<&crate::llm::types::ChatMessage> for HistoryEntry {
+    fn from(m: &crate::llm::types::ChatMessage) -> Self {
+        Self {
+            role: m.role.as_str().to_string(),
+            content: m.content.clone(),
+            context: m.context.clone(),
+            reasoning_content: m.reasoning_content.clone(),
+            tool_calls: m.tool_calls.clone(),
+            tool_call_id: m.tool_call_id.clone(),
+            name: m.name.clone(),
+        }
+    }
 }

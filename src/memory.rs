@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::MemoryConfig;
 use crate::episode::{self, Episode, EpisodeStatus};
@@ -37,20 +37,20 @@ impl MemoryManager {
         }
     }
 
-    fn ensure_parent(path: &PathBuf) {
+    fn ensure_parent(path: &Path) {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
     }
 
-    fn ensure_file(path: &PathBuf, content: &str) {
+    fn ensure_file(path: &Path, content: &str) {
         if !path.exists() {
             Self::ensure_parent(path);
             std::fs::write(path, content).ok();
         }
     }
     /// Read a file, truncated to max_file_size_kb.
-    fn read_capped(&self, path: &PathBuf) -> String {
+    fn read_capped(&self, path: &Path) -> String {
         let max_bytes = self.config.max_file_size_kb * 1024;
         match std::fs::read(path) {
             Ok(bytes) => {

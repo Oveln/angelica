@@ -1,7 +1,7 @@
 [package]
 name = "angelica"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 # Async runtime
@@ -57,3 +57,18 @@ dirs = "6.0.0"
 
 [dev-dependencies]
 tempfile = "3"
+
+[workspace]
+resolver = "2"
+members = [
+    ".",                       # angelica (TUI binary + lib)
+    "angelica-gui/src-tauri",  # Tauri GUI binary
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+angelica = { path = "." }
+dirs = "6.0.0"

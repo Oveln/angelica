@@ -487,23 +487,14 @@ fn extract_diff_preview(preview: &str) -> Option<String> {
     if !first_line.starts_with("---") && !first_line.starts_with("diff ") {
         return None;
     }
-    let all: Vec<&str> = preview.lines().collect();
-    let diff_end = all
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, l)| {
-            l.starts_with(' ')
-                || l.starts_with('+')
-                || l.starts_with('-')
-                || l.starts_with('@')
-                || l.starts_with("diff ")
-                || l.starts_with("---")
-                || l.starts_with("+++")
-        })
-        .map(|(i, _)| i)
-        .unwrap_or(0);
-    Some(all[..=diff_end].join("\n"))
+    let lines: Vec<&str> = preview.lines().collect();
+    let end = lines.iter().rposition(|l| is_diff_line(l)).unwrap_or(0);
+    Some(lines[..=end].join("\n"))
+}
+
+fn is_diff_line(l: &str) -> bool {
+    l.starts_with(' ') || l.starts_with('+') || l.starts_with('-') || l.starts_with('@')
+        || l.starts_with("diff ") || l.starts_with("---") || l.starts_with("+++")
 }
 
 #[cfg(test)]

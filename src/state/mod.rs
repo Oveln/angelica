@@ -1,15 +1,35 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::path::Path;
 
 use crate::config::FatigueConfig;
-use crate::fatigue::FatigueModel;
+use crate::fatigue::{FatigueModel, FatiguePersist};
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Clone, Debug)]
 pub struct AgentState {
     pub fatigue: FatigueModel,
     pub woke_at: String,
     pub sleep_started_at: Option<String>,
     pub dream: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct AgentStateRaw {
+    fatigue: FatiguePersist,
+    woke_at: String,
+    sleep_started_at: Option<String>,
+    dream: Option<String>,
+}
+
+impl<'de> serde::Deserialize<'de> for AgentState {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let raw = AgentStateRaw::deserialize(d)?;
+        Ok(AgentState {
+            fatigue: FatigueModel::from_persist(&raw.fatigue),
+            woke_at: raw.woke_at,
+            sleep_started_at: raw.sleep_started_at,
+            dream: raw.dream,
+        })
+    }
 }
 
 impl AgentState {
@@ -24,16 +44,12 @@ impl AgentState {
 
     pub fn load(path: &Path, fatigue_config: &FatigueConfig) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(path)?;
-        let persisted: Self = serde_json::from_str(&raw)?;
-        let fatigue = FatigueModel::new(fatigue_config).with_persisted(
-            persisted.fatigue.fatigue(),
-            persisted.fatigue.turns(),
-            persisted.fatigue.tool_calls(),
-        );
-        Ok(Self {
-            fatigue,
-            ..persisted
-        })
+        let deserialized: AgentState = serde_json::from_str(&raw)?;
+        let mut fatigue = FatigueModel::new(fatigue_config);
+        fatigue.fatigue = deserialized.fatigue.fatigue();
+        fatigue.turns = deserialized.fatigue.turns();
+        fatigue.tool_calls = deserialized.fatigue.tool_calls();
+        Ok(AgentState { fatigue, ..deserialized })
     }
 
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {

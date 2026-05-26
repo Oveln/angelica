@@ -254,52 +254,59 @@ impl Agent<AwakeMode> {
     }
 
     pub fn push_user_message(&mut self, content: &str) {
-        let full_content = self.build_user_turn_content(content);
+        let context = self.build_context();
 
-        let mut msg = crate::llm::types::ChatMessage::user(full_content);
+        let mut msg = crate::llm::types::ChatMessage::user_with_context(content, context);
         msg.name = Some("user".to_string());
         self.history.push(msg);
 
         self.dirty = true;
     }
 
-    fn build_user_turn_content(&self, user_input: &str) -> String {
+    fn build_context(&self) -> Option<crate::llm::types::Context> {
+        use crate::llm::types::Context;
+
         let now = chrono::Local::now();
-        let mut parts = Vec::new();
+        let time = now.format("%Y-%m-%d %H:%M").to_string();
 
-        parts.push(format!("当前时间：{}", now.format("%Y-%m-%d %H:%M")));
-
-        let fatigue = self.run_state.fatigue_desc();
-        if !fatigue.is_empty() {
-            parts.push(format!("你的状态：{}", fatigue));
-        }
+        let fatigue = {
+            let d = self.run_state.fatigue_desc();
+            if d.is_empty() { None } else { Some(d.to_string()) }
+        };
 
         let (turns, tool_calls, _) = self.run_state.fatigue_info();
-        if turns > 0 {
-            parts.push(format!(
-                "本轮已对话 {} 轮，使用了 {} 次工具",
-                turns, tool_calls
-            ));
-        }
 
-        if self.run_state.state().dream.is_some() {
-            parts.push("你刚从梦中醒来，梦中的感受还隐约残留。".to_string());
-        }
+        let has_dream = self.run_state.state().dream.is_some();
 
-        if !self.recall_text.is_empty()
-            && self.recall_top_score >= self.config.memory.recall_inject_threshold
-        {
-            let roll = rand::random::<f32>();
-            if roll < self.config.memory.recall_inject_probability {
-                parts.push(format!("唤起的记忆：\n{}", self.recall_text));
+        let recall = {
+            if !self.recall_text.is_empty()
+                && self.recall_top_score >= self.config.memory.recall_inject_threshold
+            {
+                let roll = rand::random::<f32>();
+                if roll < self.config.memory.recall_inject_probability {
+                    Some(self.recall_text.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
             }
-        }
+        };
 
-        format!(
-            "[以下为系统上下文，不是用户的输入]\n{}\n\n[以下是用户的输入]\n{}",
-            parts.join("\n"),
-            user_input
-        )
+        let ctx = Context {
+            time,
+            fatigue,
+            turns,
+            tool_calls,
+            has_dream,
+            recall,
+        };
+
+        if ctx.turns == 0 && ctx.fatigue.is_none() && !ctx.has_dream && ctx.recall.is_none() {
+            None
+        } else {
+            Some(ctx)
+        }
     }
 
     pub async fn save_if_dirty(&mut self) {

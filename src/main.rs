@@ -28,35 +28,7 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    let config = match cli.config {
-        Some(ref path) => {
-            let abs = if path.is_absolute() {
-                path.clone()
-            } else {
-                std::env::current_dir()?.join(path)
-            };
-            let mut cfg = angelica::config::Config::from_file(&abs)?;
-            cfg.resolve_paths();
-            cfg
-        }
-        None => {
-            let config_path = angelica::config::config_path();
-            if config_path.exists() {
-                let mut cfg = angelica::config::Config::from_file(&config_path)?;
-                cfg.resolve_paths();
-                cfg
-            } else {
-                if let Some(parent) = config_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                let mut cfg = angelica::config::Config::default();
-                std::fs::write(&config_path, toml::to_string_pretty(&cfg)?)?;
-                tracing::info!("Created default config at {}", config_path.display());
-                cfg.resolve_paths();
-                cfg
-            }
-        }
-    };
+    let config = angelica::config::Config::load_or_create(cli.config)?;
 
     let (app_event_tx, app_event_rx) = mpsc::channel::<angelica::agent::events::AppEvent>(256);
     let (user_action_tx, user_action_rx) =

@@ -141,8 +141,8 @@ impl History {
                 out.push('\n');
                 continue;
             }
-            if let Ok(tm) = serde_json::from_str::<TimedMessage>(line) {
-                if tm.message.tool_call_id.as_deref() == Some(tc_id) {
+            if let Ok(tm) = serde_json::from_str::<TimedMessage>(line)
+                && tm.message.tool_call_id.as_deref() == Some(tc_id) {
                     let updated = TimedMessage {
                         ts: tm.ts,
                         message: ChatMessage {
@@ -157,7 +157,6 @@ impl History {
                         continue;
                     }
                 }
-            }
             out.push_str(line);
             out.push('\n');
         }

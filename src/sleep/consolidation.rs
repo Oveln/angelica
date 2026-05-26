@@ -48,11 +48,10 @@ pub async fn phase_transition_and_embed(
         }
     }
 
-    if modified {
-        if let Err(e) = memory.write_all_episodes(&episodes) {
+    if modified
+        && let Err(e) = memory.write_all_episodes(&episodes) {
             tracing::error!("Failed to write updated episodes: {}", e);
         }
-    }
 
     transitioned
 }
@@ -118,13 +117,12 @@ pub async fn phase_consolidate(memory: &MemoryManager, llm: &LlmClient, transiti
 
     match llm.complete(&[system_msg, user_msg], options).await {
         Ok(response) => {
-            if let Some(content) = &response.content {
-                if let Err(e) =
+            if let Some(content) = &response.content
+                && let Err(e) =
                     apply_consolidation(memory, content, &current_self, &current_profile)
                 {
                     tracing::error!("Failed to apply consolidation: {}", e);
                 }
-            }
         }
         Err(e) => {
             tracing::error!("Consolidation LLM call failed: {}", e);
@@ -201,11 +199,10 @@ fn extract_json(text: &str) -> String {
     }
 
     // If it starts with {, find the matching }
-    if trimmed.starts_with('{') {
-        if let Some(end) = trimmed.rfind('}') {
+    if trimmed.starts_with('{')
+        && let Some(end) = trimmed.rfind('}') {
             return trimmed[..=end].to_string();
         }
-    }
 
     trimmed.to_string()
 }

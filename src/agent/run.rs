@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 
 use super::Agent;
-use super::events::{AppEvent, UserAction};
+use super::events::{AppEvent, HistoryEntry, UserAction};
 use crate::agent::modes::AwakeMode;
 
 pub async fn run(
@@ -11,6 +11,14 @@ pub async fn run(
     debug_tx: Option<tokio::sync::watch::Sender<crate::debug::DebugSnapshot>>,
 ) -> anyhow::Result<()> {
     let mut agent = Agent::<AwakeMode>::awake(config, debug_tx)?;
+
+    let init_messages: Vec<HistoryEntry> = agent
+        .history
+        .messages()
+        .iter()
+        .map(HistoryEntry::from)
+        .collect();
+    let _ = event_tx.send(AppEvent::Init { messages: init_messages }).await;
 
     if let Err(e) = agent.initialize().await {
         let _ = event_tx

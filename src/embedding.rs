@@ -26,11 +26,10 @@ pub async fn embed(config: &EmbeddingConfig, text: &str) -> Result<Vec<f32>> {
         .build()?;
 
     let mut req = client.post(&url).json(&body);
-    if !config.api_key_env.is_empty() {
-        if let Ok(key) = std::env::var(&config.api_key_env) {
+    if !config.api_key_env.is_empty()
+        && let Ok(key) = std::env::var(&config.api_key_env) {
             req = req.bearer_auth(&key);
         }
-    }
     let resp = req.send().await?;
 
     if !resp.status().is_success() {

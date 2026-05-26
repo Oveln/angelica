@@ -92,7 +92,7 @@ impl Agent<SleepingMode> {
 
         let embed_config = &self.config.embedding;
         let transitioned =
-            consolidation::phase_transition_and_embed(&self.memory, &embed_config).await;
+            consolidation::phase_transition_and_embed(&self.memory, embed_config).await;
 
         consolidation::phase_consolidate(&self.memory, &self.llm, &transitioned).await;
 
