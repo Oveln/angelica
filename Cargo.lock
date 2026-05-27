@@ -81,6 +81,7 @@ version = "0.1.0"
 dependencies = [
  "angelica",
  "anyhow",
+ "clap",
  "dirs",
  "serde",
  "serde_json",

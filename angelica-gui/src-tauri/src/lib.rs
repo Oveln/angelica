@@ -116,11 +116,11 @@ pub struct AppState {
     pub user_tx: Mutex<mpsc::Sender<UserAction>>,
 }
 
-pub fn run() {
-    init_logging();
+pub fn run(debug: bool, log_level: Option<&str>, config_path: Option<std::path::PathBuf>) {
+    init_logging(log_level);
     tracing::info!("angelica-gui starting");
 
-    let config = match Config::load_or_create(None) {
+    let config = match Config::load_or_create(config_path) {
         Ok(cfg) => cfg,
         Err(e) => {
             tracing::error!("Failed to load config: {}", e);
@@ -139,6 +139,17 @@ pub fn run() {
             tracing::warn!("Failed to initialize data git repo: {}", e);
         }
     }
+
+    let debug_tx = if debug {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 9914));
+        let default_snapshot = angelica::debug::DebugSnapshot::default();
+        let (tx, rx) = tokio::sync::watch::channel(default_snapshot);
+        tracing::info!("Starting debug server on http://{addr}");
+        angelica::debug::start_debug_server(addr, rx);
+        Some(tx)
+    } else {
+        None
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -174,7 +185,7 @@ pub fn run() {
 
             tauri::async_runtime::spawn(async move {
                 tracing::info!("Agent starting");
-                match angelica::agent::run(config, user_action_rx, app_event_tx, None).await {
+                match angelica::agent::run(config, user_action_rx, app_event_tx, debug_tx).await {
                     Ok(()) => tracing::info!("Agent exited normally"),
                     Err(e) => tracing::error!("Agent error: {}", e),
                 }
@@ -200,9 +211,12 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn init_logging() {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+fn init_logging(log_level: Option<&str>) {
+    let env_filter = match log_level {
+        Some(level) => tracing_subscriber::EnvFilter::new(level),
+        None => tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+    };
 
     let log_dir = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))

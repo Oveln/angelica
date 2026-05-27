@@ -37,19 +37,10 @@ fn init_logging(log_level: Option<&str>) {
         .with_level(true)
         .with_target(false)
         .with_line_number(false)
-        .with_filter(env_filter.clone());
-
-    let stderr_layer = tracing_subscriber::fmt::layer()
-        .with_writer(std::io::stderr)
-        .with_ansi(true)
-        .with_level(true)
-        .with_target(false)
-        .with_line_number(false)
         .with_filter(env_filter);
 
     tracing_subscriber::registry()
         .with(file_layer)
-        .with(stderr_layer)
         .init();
 
     // Leak the guard so the non-blocking writer stays alive.

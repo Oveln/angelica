@@ -18,7 +18,10 @@ pub struct DebugState {
 
 // ── Server startup ────────────────────────────────────────────
 
-pub fn start_debug_server(addr: std::net::SocketAddr, snapshot_rx: watch::Receiver<DebugSnapshot>) {
+pub fn start_debug_server(
+    addr: std::net::SocketAddr,
+    snapshot_rx: watch::Receiver<DebugSnapshot>,
+) {
     let state = DebugState { snapshot_rx };
     let app = Router::new()
         .route("/", get(handler_index))
@@ -30,17 +33,20 @@ pub fn start_debug_server(addr: std::net::SocketAddr, snapshot_rx: watch::Receiv
         .layer(CorsLayer::permissive())
         .with_state(Arc::new(state));
 
-    tokio::spawn(async move {
-        let listener = match tokio::net::TcpListener::bind(addr).await {
-            Ok(l) => l,
-            Err(e) => {
-                tracing::warn!("Debug server bind failed: {e}");
-                return;
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().expect("debug server runtime");
+        rt.block_on(async move {
+            let listener = match tokio::net::TcpListener::bind(addr).await {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::warn!("Debug server bind failed: {e}");
+                    return;
+                }
+            };
+            if let Err(e) = axum::serve(listener, app).await {
+                tracing::warn!("Debug server error: {e}");
             }
-        };
-        if let Err(e) = axum::serve(listener, app).await {
-            tracing::warn!("Debug server error: {e}");
-        }
+        });
     });
 }
 

@@ -28,6 +28,12 @@ fn main() {
             }
             let mut c = Command::new("cargo");
             c.args(["tauri", "dev"]);
+            if !&args[1..].is_empty() {
+                c.arg("--");
+            }
+            for a in &args[1..] {
+                c.arg(a);
+            }
             c.current_dir(&gui_dir);
             run_gui(&mut c);
         }
@@ -43,7 +49,7 @@ fn main() {
             println!("  test         cargo test\n");
             println!("EXAMPLES:");
             println!("  cargo run -p xtask -- tui -- --debug --log-level debug");
-            println!("  cargo run -p xtask -- gui");
+            println!("  cargo run -p xtask -- gui -- --debug");
         }
         "check" => {
             run(Command::new("cargo").args(["check", "--workspace"]));
