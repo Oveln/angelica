@@ -71,9 +71,15 @@ fn run(c: &mut Command) {
 }
 
 fn run_gui(c: &mut Command) {
-    let status = c.stdin(std::process::Stdio::null()).status().expect("failed to execute command");
+    let status = c
+        .stdin(std::process::Stdio::null())
+        .status()
+        .expect("failed to execute command");
     let code = status.code().unwrap_or(1);
-    let _ = Command::new("stty").arg("sane").stdin(std::process::Stdio::inherit()).status();
+    let _ = Command::new("stty")
+        .arg("sane")
+        .stdin(std::process::Stdio::inherit())
+        .status();
     if !status.success() {
         exit(code);
     }

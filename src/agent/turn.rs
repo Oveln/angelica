@@ -54,7 +54,11 @@ impl<S: RunMode> Agent<S> {
         self.emit_debug_snapshot();
         let messages = self.build_turn_messages();
         let tools = self.all_tool_specs();
-        let total_chars: usize = messages.iter().filter_map(|m| m.content.as_ref()).map(|c| c.len()).sum();
+        let total_chars: usize = messages
+            .iter()
+            .filter_map(|m| m.content.as_ref())
+            .map(|c| c.len())
+            .sum();
         let est_tokens = total_chars / 4;
         tracing::info!(
             messages = messages.len(),

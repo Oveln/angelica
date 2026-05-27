@@ -15,6 +15,10 @@
   import ApprovalPanel from './components/ApprovalPanel.svelte';
   import SlashMenu from './components/SlashMenu.svelte';
   import UsageStats from './components/UsageStats.svelte';
+  import SettingsPanel from './components/SettingsPanel.svelte';
+  import { showSettingsPanel, closeSettingsPanel } from '$lib/commands.svelte';
+
+  const settings = showSettingsPanel();
 
   const s = getStore();
 
@@ -192,6 +196,11 @@
     <UsageStats
       sessions={s.usageSessions}
       onClose={() => s.showUsageStats = false}
+    />
+  {/if}
+  {#if settings.visible}
+    <SettingsPanel
+      onClose={closeSettingsPanel}
     />
   {/if}
 </div>

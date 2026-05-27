@@ -2,6 +2,9 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import type {
   ApprovalPendingPayload,
+  ConfigLoadedPayload,
+  ConfigSavedPayload,
+  DataDirPayload,
   ErrorPayload,
   FatigueUpdatePayload,
   InitPayload,
@@ -70,6 +73,43 @@ export function quit(): Promise<void> {
   return invoke('quit');
 }
 
+// Config operations go through the event bridge (agent ↔ frontend)
+// so they work identically with a local or remote agent.
+
+/** Wait for a single Tauri event, then unsubscribe. */
+function once<T>(event: string): Promise<T> {
+  return new Promise((resolve) => {
+    const p = listen<T>(event, (e) => {
+      p.then((fn) => fn());
+      resolve(e.payload);
+    });
+  });
+}
+
+export async function loadConfig(): Promise<string> {
+  const p = once<ConfigLoadedPayload>('config-loaded');
+  await invoke('load_config');
+  return (await p).toml;
+}
+
+export async function saveConfig(tomlStr: string): Promise<string> {
+  // Set up listeners first to avoid race with event delivery.
+  const saved = once<ConfigSavedPayload>('config-saved');
+  const errored = once<ErrorPayload>('error');
+  await invoke('save_config', { tomlStr });
+  const result = await Promise.race([
+    saved.then((p) => p.message),
+    errored.then((p) => { throw new Error(p.message); }),
+  ]);
+  return result;
+}
+
+export async function getDataDir(): Promise<string> {
+  const p = once<DataDirPayload>('data-dir');
+  await invoke('get_data_dir');
+  return (await p).path;
+}
+
 export type AppEventMap = {
   'init': InitPayload;
   'thinking-delta': ThinkingDeltaPayload;
@@ -87,6 +127,9 @@ export type AppEventMap = {
   'falling-asleep': {};
   'sleeping': {};
   'waking-up': WakingUpPayload;
+  'config-loaded': ConfigLoadedPayload;
+  'config-saved': ConfigSavedPayload;
+  'data-dir': DataDirPayload;
 };
 
 export function onAppEvent<K extends keyof AppEventMap>(

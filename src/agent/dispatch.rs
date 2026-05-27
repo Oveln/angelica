@@ -15,10 +15,8 @@ pub(super) enum ProcessOutcome {
 impl<S: RunMode> Agent<S> {
     #[tracing::instrument(skip(self), fields(tool = name))]
     async fn execute_tool(&mut self, name: &str, args: serde_json::Value) -> String {
-        let args_preview = crate::agent::truncate_str(
-            &serde_json::to_string(&args).unwrap_or_default(),
-            200,
-        );
+        let args_preview =
+            crate::agent::truncate_str(&serde_json::to_string(&args).unwrap_or_default(), 200);
         tracing::debug!(args = %args_preview, "executing tool");
         if let Some(tool) = self.run_state.get_tool(name) {
             let result = tool.execute(args).await;

@@ -2,6 +2,12 @@
 
 export type ApprovalPendingPayload = { call_id: string, tool_name: string, tool_target: string | null, preview: string, tool_label: string, is_diff: boolean, };
 
+export type ConfigLoadedPayload = { toml: string, };
+
+export type ConfigSavedPayload = { message: string, };
+
+export type DataDirPayload = { path: string, };
+
 export type DisplayEntry = { "type": "chat", role: DisplayRole, content: string, thinking: string | null, } | { "type": "tool", call_id: string, name: string, args_display: string, result: string | null, diff_preview: string | null, };
 
 export type DisplayRole = "user" | "assistant" | "system";
@@ -42,4 +48,4 @@ export type WakingUpPayload = { dream: string, };
 /**
  * ── Module-scope anchor for TS export (don't call `export_all` on payload types) ──
  */
-export type _AllPayloads = { init: InitPayload, thinking_delta: ThinkingDeltaPayload, text_delta: TextDeltaPayload, text_done: TextDonePayload, tool_calling: ToolCallingPayload, tool_result: ToolResultPayload, approval_pending: ApprovalPendingPayload, tool_rejected: ToolRejectedPayload, error: ErrorPayload, fatigue_update: FatigueUpdatePayload, usage_update: UsageUpdatePayload, usage_stats_loaded: UsageStatsLoadedPayload, waking_up: WakingUpPayload, };
+export type _AllPayloads = { init: InitPayload, thinking_delta: ThinkingDeltaPayload, text_delta: TextDeltaPayload, text_done: TextDonePayload, tool_calling: ToolCallingPayload, tool_result: ToolResultPayload, approval_pending: ApprovalPendingPayload, tool_rejected: ToolRejectedPayload, error: ErrorPayload, fatigue_update: FatigueUpdatePayload, usage_update: UsageUpdatePayload, usage_stats_loaded: UsageStatsLoadedPayload, waking_up: WakingUpPayload, config_loaded: ConfigLoadedPayload, config_saved: ConfigSavedPayload, data_dir: DataDirPayload, };

@@ -76,6 +76,11 @@ pub static BUILTIN_COMMANDS: &[SlashCommand] = &[
         aliases: &["stats"],
         description: "Show token usage statistics",
     },
+    SlashCommand {
+        name: "settings",
+        aliases: &["set", "config"],
+        description: "Open settings panel",
+    },
 ];
 
 #[derive(Debug, Clone)]

@@ -1,8 +1,10 @@
 pub(crate) mod approval;
 pub(crate) mod chat;
+pub(crate) mod settings;
 pub(crate) mod slash;
 
 pub use approval::ApprovalState;
+pub use settings::SettingsState;
 pub use slash::{SlashAction, SlashMenuState};
 
 use tokio::sync::mpsc;
@@ -71,7 +73,7 @@ impl ApprovalChoice {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum AppMode {
     Welcome,
     Chat,
@@ -79,6 +81,7 @@ pub enum AppMode {
     SlashMenu(SlashMenuState),
     Approval(ApprovalState),
     UsageStats,
+    Settings(SettingsState),
 }
 
 pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::Sender<UserAction>) {
@@ -166,6 +169,10 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
             "usage" | "stats" => {
                 let _ = tx.send(UserAction::UsageStats).await;
             }
+            "settings" | "set" | "config" => match crate::mode::SettingsState::load().await {
+                Some(s) => state.mode = crate::mode::AppMode::Settings(s),
+                None => state.add_chat(Role::System, "Failed to load config", None),
+            },
             _ => {
                 state.add_chat(
                     Role::System,

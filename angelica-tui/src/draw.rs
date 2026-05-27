@@ -107,6 +107,9 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
     if matches!(state.mode, AppMode::UsageStats) {
         draw_usage_stats(f, state, f.area(), &theme);
     }
+    if matches!(state.mode, AppMode::Settings(_)) {
+        crate::mode::settings::draw(f, state, f.area(), &theme);
+    }
 
     if !state.queued_messages.is_empty() {
         let queue_area = Rect {
@@ -319,11 +322,13 @@ fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
         AppMode::Approval(_) => "\u{25D0} approval",
         AppMode::SlashMenu(_) => "\u{25CB} idle",
         AppMode::UsageStats => "\u{25C6} usage",
+        AppMode::Settings(_) => "\u{2699} settings",
     };
     let mode_style = match &state.mode {
         AppMode::Streaming => Style::default().fg(theme.success),
         AppMode::Approval(_) => Style::default().fg(theme.warning),
         AppMode::UsageStats => Style::default().fg(theme.accent),
+        AppMode::Settings(_) => Style::default().fg(theme.accent),
         _ => Style::default().fg(theme.status_muted),
     };
 

@@ -140,6 +140,11 @@ impl AppState {
                 self.cached_usage_sessions = Some(sessions.clone());
                 self.mode = AppMode::UsageStats;
             }
+            AppEvent::ConfigLoaded { .. }
+            | AppEvent::ConfigSaved { .. }
+            | AppEvent::DataDir { .. } => {
+                // Settings panel manages config via its own TUI module
+            }
         }
     }
 }

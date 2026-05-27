@@ -185,6 +185,20 @@ async fn handle_key(
         }
         return;
     }
+    if let AppMode::Settings(ref mut s) = state.mode {
+        let is_close_key = matches!(
+            key.code,
+            crossterm::event::KeyCode::Esc | crossterm::event::KeyCode::Char('q')
+        );
+        if is_close_key && !s.editing {
+            state.mode = AppMode::Chat;
+        } else if !s.editing && key.code == crossterm::event::KeyCode::Char('s') {
+            s.save().await;
+        } else {
+            s.handle_key(key);
+        }
+        return;
+    }
 
     match state.mode {
         AppMode::Approval(_) => {

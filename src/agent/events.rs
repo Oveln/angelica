@@ -46,6 +46,15 @@ pub enum AppEvent {
         feedback: String,
     },
 
+    ConfigLoaded {
+        toml: String,
+    },
+    ConfigSaved {
+        message: String,
+    },
+    DataDir {
+        path: String,
+    },
     Error {
         message: String,
     },
@@ -87,6 +96,11 @@ pub enum UserAction {
     },
     ForceSleep,
     RebuildEmbeddings,
+    LoadConfig,
+    SaveConfig {
+        toml_str: String,
+    },
+    GetDataDir,
     UsageStats,
     RequestInit,
     Quit,
@@ -187,6 +201,23 @@ pub struct UsageStatsLoadedPayload {
 #[ts(export_to = "api-generated.ts")]
 pub struct WakingUpPayload {
     pub dream: String,
+}
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export_to = "api-generated.ts")]
+pub struct ConfigLoadedPayload {
+    pub toml: String,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export_to = "api-generated.ts")]
+pub struct ConfigSavedPayload {
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export_to = "api-generated.ts")]
+pub struct DataDirPayload {
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -306,6 +337,9 @@ struct _AllPayloads {
     usage_update: UsageUpdatePayload,
     usage_stats_loaded: UsageStatsLoadedPayload,
     waking_up: WakingUpPayload,
+    config_loaded: ConfigLoadedPayload,
+    config_saved: ConfigSavedPayload,
+    data_dir: DataDirPayload,
 }
 
 #[cfg(test)]

@@ -6,6 +6,12 @@ import {
 } from '$lib/api';
 import { getStore } from '$lib/store.svelte';
 
+// Settings panel state: use a reactive object so consumers can bind
+const settingsState = $state({ visible: false });
+export function showSettingsPanel() { return settingsState; }
+export function openSettingsPanel() { settingsState.visible = true; }
+export function closeSettingsPanel() { settingsState.visible = false; }
+
 export interface SlashCommand {
   name: string;
   aliases: string[];
@@ -21,6 +27,7 @@ export const BUILTIN_COMMANDS: SlashCommand[] = [
   { name: 'sleep', aliases: [], description: '让祈芷入睡（梦境与沉淀）' },
   { name: 'rebuild-embeddings', aliases: ['rebuild'], description: '重建情景记忆的嵌入向量' },
   { name: 'usage', aliases: ['stats'], description: '显示 token 用量统计' },
+  { name: 'settings', aliases: ['set', 'config'], description: '打开设置面板' },
 ];
 
 export async function executeSlashCommand(cmd: string): Promise<void> {
@@ -71,6 +78,9 @@ export async function executeSlashCommand(cmd: string): Promise<void> {
       break;
     case 'usage':
       await apiRequestUsageStats();
+      break;
+    case 'settings':
+      openSettingsPanel();
       break;
   }
 }

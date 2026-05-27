@@ -53,15 +53,44 @@ angelica-gui/        Tauri GUI（实验性）
 AppEvent { Init, ThinkingDelta, TextDelta, TextDone, TurnComplete,
            ToolCalling, ToolResult, ApprovalPending, ToolRejected,
            Error, FatigueUpdate, UsageUpdate, UsageStatsLoaded,
+           ConfigLoaded, ConfigSaved, DataDir,
            FallingAsleep, Sleeping, WakingUp }
 UserAction { SendMessage, ApprovePending, ApproveAlways, RejectTool,
-             ForceSleep, RebuildEmbeddings, UsageStats, RequestInit, Quit }
+             ForceSleep, RebuildEmbeddings, UsageStats,
+             LoadConfig, SaveConfig, GetDataDir, RequestInit, Quit }
 ```
 
 - TUI：`app_event_rx.recv()` → `state.handle_event()` → 渲染状态更新，不做数据处理
 - GUI：`serialize_event()` 通过 ts-rs payload 类型序列化为 JSON → Tauri emit → Svelte store 更新
 
 **GUI 线程模型**：agent 和 event bridge 均在 `tauri::async_runtime::spawn` 上运行，无独立 tokio runtime 或 `std::thread`。
+
+#### 4.1.1 事件桥设计原则
+
+Agent 未来可能运行在远程服务器上，通过事件桥与前端 UI 交互。因此**前端不直接访问文件系统或核心状态**，一切操作走 `UserAction` → `AppEvent` 往返：
+
+```
+前端 invoke('some_action')                   前端 listen('response-event')
+     ↓                                              ↑
+Tauri command → UserAction channel                  │
+     ↓                                              │
+agent run_loop 处理 → AppEvent channel ─────────────┘
+```
+
+**Tauri command 的角色**：仅作为薄转发层，将前端请求序列化为 `UserAction` 发送到 channel，立即返回 `()`。不做任何业务逻辑、不访问文件系统、不调用 core API。
+
+**请求-响应模式**：
+- 一次往返 = 一个 `UserAction` 变体 + 一个对应的 `AppEvent` 变体（如 `LoadConfig` → `ConfigLoaded`，`SaveConfig` → `ConfigSaved`）
+- 前端实现模板：先注册 `once(event)` 监听，再 `invoke` 触发，避免竞态（事件在监听器注册前到达会被丢弃）
+- 配置加载/保存、数据目录查询等均遵循此模式
+
+**新增操作检查清单**：
+1. `UserAction` 加变体 → `agent/events.rs`
+2. `AppEvent` 加对应变体 + TS payload 类型
+3. `agent/run.rs` 的 `run_loop` 中处理新 action
+4. `lib.rs` 加 Tauri command（仅 channel 转发）+ `serialize_event` 加 match arm
+5. `api.ts` 加封装函数（listen before invoke）
+6. `cargo test` 重新生成 TS 类型
 
 ### 4.2 Agent 状态机
 

@@ -3,6 +3,7 @@ use tokio::sync::mpsc;
 use super::Agent;
 use super::events::{AppEvent, UserAction};
 use crate::agent::modes::AwakeMode;
+use crate::config::{self, Config};
 use crate::usage::{self, restore_current_usage};
 
 #[tracing::instrument(skip(config, user_rx, event_tx, debug_tx), fields(
@@ -157,6 +158,84 @@ async fn run_loop(
                         model_name: model_name.clone(),
                     })
                     .await;
+            }
+            UserAction::LoadConfig => {
+                tracing::info!("loading config");
+                let path = config::config_path();
+                let raw_res = tokio::task::spawn_blocking(move || {
+                    if path.exists() {
+                        std::fs::read_to_string(&path).map_err(|e| e.to_string())
+                    } else {
+                        let default_config = Config::default();
+                        toml::to_string_pretty(&default_config).map_err(|e| e.to_string())
+                    }
+                })
+                .await
+                .unwrap_or(Err("spawn_blocking failed".to_string()));
+                match raw_res {
+                    Ok(raw) => {
+                        let _ = event_tx.send(AppEvent::ConfigLoaded { toml: raw }).await;
+                    }
+                    Err(e) => {
+                        let _ = event_tx
+                            .send(AppEvent::Error {
+                                message: format!("Failed to load config: {}", e),
+                            })
+                            .await;
+                    }
+                }
+            }
+            UserAction::SaveConfig { toml_str } => {
+                tracing::info!("saving config");
+                match Config::parse_toml(&toml_str) {
+                    Ok(_) => {
+                        let path = config::config_path();
+                        let write_result = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+                            if let Some(parent) = path.parent() {
+                                let _ = std::fs::create_dir_all(parent);
+                            }
+                            let tmp = path.with_extension("toml.tmp");
+                            std::fs::write(&tmp, &toml_str)?;
+                            if let Err(e) = std::fs::rename(&tmp, &path) {
+                                let _ = std::fs::remove_file(&tmp);
+                                return Err(e);
+                            }
+                            Ok(())
+                        })
+                        .await
+                        .unwrap_or(Err(std::io::Error::other(
+                            "spawn_blocking failed",
+                        )));
+                        match write_result {
+                            Ok(()) => {
+                                let _ = event_tx
+                                    .send(AppEvent::ConfigSaved {
+                                        message: "Saved to config.toml (restart to apply)"
+                                            .to_string(),
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = event_tx
+                                    .send(AppEvent::Error {
+                                        message: format!("Config save failed: {}", e),
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = event_tx
+                            .send(AppEvent::Error {
+                                message: format!("Config validation failed: {}", e),
+                            })
+                            .await;
+                    }
+                }
+            }
+            UserAction::GetDataDir => {
+                let path = config::data_base_dir().to_string_lossy().to_string();
+                let _ = event_tx.send(AppEvent::DataDir { path }).await;
             }
             UserAction::Quit => {
                 tracing::info!(action_count, "agent shutting down");

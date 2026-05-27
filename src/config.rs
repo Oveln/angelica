@@ -7,10 +7,14 @@ use crate::permission::PermissionConfig;
 
 const APP_NAME: &str = "angelica";
 
-fn data_dir() -> PathBuf {
+fn default_data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())))
         .join(APP_NAME)
+}
+
+pub fn data_base_dir() -> PathBuf {
+    default_data_dir()
 }
 
 pub fn config_path() -> PathBuf {
@@ -83,7 +87,7 @@ impl Config {
     }
 
     pub fn resolve_paths(&mut self) {
-        let base = data_dir();
+        let base = default_data_dir();
         self.memory.episodes_path = Self::absolute_or(&base, &self.memory.episodes_path);
         self.memory.self_path = Self::absolute_or(&base, &self.memory.self_path);
         self.memory.profiles_dir = Self::absolute_or(&base, &self.memory.profiles_dir);
@@ -373,7 +377,7 @@ impl StateConfig {
         PathBuf::from(&self.conversation_path)
             .parent()
             .map(|p| p.to_path_buf())
-            .unwrap_or_else(data_dir)
+            .unwrap_or_else(default_data_dir)
     }
 }
 

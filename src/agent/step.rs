@@ -52,10 +52,7 @@ impl<S: RunMode> Agent<S> {
                 return false;
             }
 
-            tracing::debug!(
-                iteration = self.iteration,
-                "requesting llm turn",
-            );
+            tracing::debug!(iteration = self.iteration, "requesting llm turn",);
             let Some(llm_result) = self.next_llm_response(event_tx, stream_to_tui).await else {
                 return false;
             };
@@ -107,10 +104,7 @@ impl<S: RunMode> Agent<S> {
                 return false;
             };
 
-            tracing::debug!(
-                tool_calls = tcs.len(),
-                "turn complete: tool calls received"
-            );
+            tracing::debug!(tool_calls = tcs.len(), "turn complete: tool calls received");
 
             self.run_state.on_tool_calls(tcs.len());
             if stream_to_tui && let Some(evt) = self.run_state.fatigue_update_event() {

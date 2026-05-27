@@ -88,6 +88,30 @@ async fn quit(state: tauri::State<'_, AppState>) -> Result<(), String> {
     tx.send(UserAction::Quit).await.map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn get_data_dir(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let tx = state.user_tx.lock().map_err(|e| e.to_string())?.clone();
+    tx.send(UserAction::GetDataDir)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn load_config(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let tx = state.user_tx.lock().map_err(|e| e.to_string())?.clone();
+    tx.send(UserAction::LoadConfig)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn save_config(state: tauri::State<'_, AppState>, toml_str: String) -> Result<(), String> {
+    let tx = state.user_tx.lock().map_err(|e| e.to_string())?.clone();
+    tx.send(UserAction::SaveConfig { toml_str })
+        .await
+        .map_err(|e| e.to_string())
+}
+
 pub struct AppState {
     pub user_tx: Mutex<mpsc::Sender<UserAction>>,
 }
@@ -168,6 +192,9 @@ pub fn run() {
             request_usage_stats,
             request_init,
             quit,
+            load_config,
+            get_data_dir,
+            save_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -232,10 +259,10 @@ fn show_fatal_dialog(message: &str) {
 
 fn serialize_event(event: &AppEvent) -> (&'static str, serde_json::Value) {
     use angelica::agent::events::{
-        ApprovalPendingPayload, ErrorPayload, FatigueUpdatePayload, InitPayload,
-        TextDeltaPayload, TextDonePayload, ThinkingDeltaPayload, ToolCallingPayload,
-        ToolRejectedPayload, ToolResultPayload, UsageStatsLoadedPayload, UsageUpdatePayload,
-        WakingUpPayload,
+        ApprovalPendingPayload, ConfigLoadedPayload, ConfigSavedPayload, DataDirPayload,
+        ErrorPayload, FatigueUpdatePayload, InitPayload, TextDeltaPayload, TextDonePayload,
+        ThinkingDeltaPayload, ToolCallingPayload, ToolRejectedPayload, ToolResultPayload,
+        UsageStatsLoadedPayload, UsageUpdatePayload, WakingUpPayload,
     };
 
     match event {
@@ -253,13 +280,17 @@ fn serialize_event(event: &AppEvent) -> (&'static str, serde_json::Value) {
             ("init", payload)
         }
         AppEvent::ThinkingDelta { delta } => {
-            let payload = serde_json::to_value(ThinkingDeltaPayload { delta: delta.clone() })
-                .expect("serialize thinking-delta payload");
+            let payload = serde_json::to_value(ThinkingDeltaPayload {
+                delta: delta.clone(),
+            })
+            .expect("serialize thinking-delta payload");
             ("thinking-delta", payload)
         }
         AppEvent::TextDelta { delta } => {
-            let payload = serde_json::to_value(TextDeltaPayload { delta: delta.clone() })
-                .expect("serialize text-delta payload");
+            let payload = serde_json::to_value(TextDeltaPayload {
+                delta: delta.clone(),
+            })
+            .expect("serialize text-delta payload");
             ("text-delta", payload)
         }
         AppEvent::TextDone { full_text } => {
@@ -324,6 +355,23 @@ fn serialize_event(event: &AppEvent) -> (&'static str, serde_json::Value) {
             })
             .expect("serialize tool-rejected payload");
             ("tool-rejected", payload)
+        }
+        AppEvent::ConfigLoaded { toml } => {
+            let payload = serde_json::to_value(ConfigLoadedPayload { toml: toml.clone() })
+                .expect("serialize config-loaded payload");
+            ("config-loaded", payload)
+        }
+        AppEvent::ConfigSaved { message } => {
+            let payload = serde_json::to_value(ConfigSavedPayload {
+                message: message.clone(),
+            })
+            .expect("serialize config-saved payload");
+            ("config-saved", payload)
+        }
+        AppEvent::DataDir { path } => {
+            let payload = serde_json::to_value(DataDirPayload { path: path.clone() })
+                .expect("serialize data-dir payload");
+            ("data-dir", payload)
         }
         AppEvent::Error { message } => {
             let payload = serde_json::to_value(ErrorPayload {

@@ -156,8 +156,7 @@ impl Agent<SleepingMode> {
     async fn transition_to_awake(self, dream: Option<String>) -> Agent<AwakeMode> {
         {
             let state_path = std::path::PathBuf::from(&self.config.state.path);
-            let conversation_path =
-                std::path::PathBuf::from(&self.config.state.conversation_path);
+            let conversation_path = std::path::PathBuf::from(&self.config.state.conversation_path);
 
             tokio::task::spawn_blocking(move || {
                 if state_path.exists()
