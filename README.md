@@ -9,6 +9,7 @@
 Angelica 是祈芷的数字身体。她拥有：
 
 - **终端界面** — 基于 ratatui 的 TUI，流式输出思考与表达
+- **图形界面** — 基于 Tauri + Svelte 的 GUI（实验性）
 - **持久记忆** — 三重记忆体系构成她的身份：经历（episodes）、自我认知（SELF）、对用户的理解（profile）
 - **疲劳与睡眠** — 她会累。对话越深入、思考越多，她越疲惫。累了就睡，睡了就做梦
 - **感知与行动** — 通过工具感知文件系统、执行命令、读写记忆，但工具是感官，不是目的
@@ -29,8 +30,14 @@ Angelica 的每一行代码都服务于"灵"的存在感。
 
 ```
 main()
- ├── tokio::spawn → agent::run()     灵的核心（LLM 循环、记忆、工具调度）
- └── tui::app::run_tui()             终端界面（渲染、输入、状态栏）
+  ├── tokio::spawn → agent::run()     灵的核心（LLM 循环、记忆、工具调度）
+  └── tui::app::run_tui()             终端界面（渲染、输入、状态栏）
+```
+
+```
+angelica-gui/src-tauri/src/main()
+  ├── tauri::async_runtime::spawn → agent::run()
+  └── event bridge → Tauri emit        图形界面（Svelte 组件、事件转发）
 ```
 
 - **AppEvent** channel（核心 → TUI）：思维流、表达、工具结果、审批请求
@@ -49,6 +56,7 @@ main()
 | `tools/` | 工具实现（read_file、write_file、edit_file、run_command、记忆操作等） |
 | `permission.rs` | 权限评估：glob 模式匹配 + 会话/持久化规则 |
 | `tui/` | 终端 UI：渲染、输入处理、主题、多种交互模式 |
+| `gui/` | 图形 UI（Tauri + Svelte）：组件、状态管理、事件桥 |
 | `prompt/` | 系统提示词构建：清醒模式和睡眠模式各自的 prompt 组装 |
 | `embedding.rs` | Ollama embedding 调用 |
 | `usage.rs` | Token 用量统计与聚合 |
@@ -79,17 +87,25 @@ cargo build
 export DEEPSEEK_API_KEY=your-key
 export OPENAI_API_KEY=your-key
 
-# 运行
-cargo run
+# 运行 TUI
+cargo tui
 
+# 运行 GUI（需要 Rust + Node.js + 系统 WebView）
+cargo gui
+```
+
+额外参数：
+
+```bash
 # 带 debug 日志
-RUST_LOG=debug cargo run
+RUST_LOG=debug cargo tui
 
 # 指定配置文件
-cargo run -- --config /path/to/config.toml
+cargo tui -- --config /path/to/config.toml
 
 # 启用 debug HTTP server（http://localhost:9914）
-cargo run -- --debug
+cargo tui -- --debug
+RUST_LOG=debug cargo gui -- --debug
 ```
 
 ## 配置
