@@ -3,6 +3,7 @@ import {
   forceSleep as apiForceSleep,
   rebuildEmbeddings as apiRebuildEmbeddings,
   requestUsageStats as apiRequestUsageStats,
+  undo as apiUndo,
 } from '$lib/api';
 import { getStore } from '$lib/store.svelte';
 
@@ -28,6 +29,7 @@ export const BUILTIN_COMMANDS: SlashCommand[] = [
   { name: 'rebuild-embeddings', aliases: ['rebuild'], description: '重建情景记忆的嵌入向量' },
   { name: 'usage', aliases: ['stats'], description: '显示 token 用量统计' },
   { name: 'settings', aliases: ['set', 'config'], description: '打开设置面板' },
+  { name: 'undo', aliases: ['u'], description: '撤回上一条消息' },
 ];
 
 export async function executeSlashCommand(cmd: string): Promise<void> {
@@ -81,6 +83,10 @@ export async function executeSlashCommand(cmd: string): Promise<void> {
       break;
     case 'settings':
       openSettingsPanel();
+      break;
+    case 'undo':
+      s.addSystemMessage('正在撤回...');
+      await apiUndo();
       break;
   }
 }

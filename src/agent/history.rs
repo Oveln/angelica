@@ -241,6 +241,34 @@ impl History {
         entries
     }
 
+    pub fn undo_last_exchange(&mut self) -> bool {
+        let last_user = self.messages.iter().rposition(|m| m.role == Role::User);
+        let Some(cut) = last_user else {
+            return false;
+        };
+        self.messages.truncate(cut);
+        self.rewrite_file();
+        true
+    }
+
+    fn rewrite_file(&mut self) {
+        self.flush();
+        self.buf_writer = None;
+        let kept = self.messages.len();
+        let file_content = std::fs::read_to_string(&self.path).unwrap_or_default();
+        let lines: Vec<&str> = file_content.lines().collect();
+        let non_empty: Vec<&str> = lines
+            .iter()
+            .filter(|l| !l.trim().is_empty())
+            .copied()
+            .collect();
+        if kept > non_empty.len() {
+            return;
+        }
+        let out: String = non_empty[..kept].join("\n") + if kept > 0 { "\n" } else { "" };
+        let _ = std::fs::write(&self.path, out);
+    }
+
     pub fn clear(&mut self) {
         self.messages.clear();
         self.buf_writer = None;
@@ -528,5 +556,121 @@ mod tests {
             ),
             ""
         );
+    }
+
+    #[test]
+    fn undo_basic_exchange() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("conversation.jsonl");
+        let mut history = History::new(path);
+
+        history.push(ChatMessage::user("hello"));
+        history.record_assistant(Some("hi".into()), None, None, None);
+
+        assert!(history.undo_last_exchange());
+        assert_eq!(history.messages().len(), 0);
+    }
+
+    #[test]
+    fn undo_preserves_earlier_exchange() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("conversation.jsonl");
+        let mut history = History::new(path);
+
+        history.push(ChatMessage::user("first"));
+        history.record_assistant(Some("reply1".into()), None, None, None);
+        history.push(ChatMessage::user("second"));
+        history.record_assistant(Some("reply2".into()), None, None, None);
+
+        assert!(history.undo_last_exchange());
+        assert_eq!(history.messages().len(), 2);
+        assert_eq!(history.messages()[0].content.as_deref(), Some("first"));
+        assert_eq!(history.messages()[1].content.as_deref(), Some("reply1"));
+    }
+
+    #[test]
+    fn undo_with_tool_calls() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("conversation.jsonl");
+        let mut history = History::new(path);
+
+        history.push(ChatMessage::user("read foo.rs"));
+        history.record_assistant(
+            Some("let me check".into()),
+            None,
+            Some(vec![crate::llm::types::ToolCall {
+                id: "tc_1".into(),
+                function: crate::llm::types::FunctionCall {
+                    name: "read_file".into(),
+                    arguments: r#"{"path":"foo.rs"}"#.into(),
+                },
+            }]),
+            None,
+        );
+        history.record_tool_result("tc_1".into(), "file contents".into());
+        history.record_assistant(Some("here is the file".into()), None, None, None);
+
+        assert!(history.undo_last_exchange());
+        assert_eq!(history.messages().len(), 0);
+    }
+
+    #[test]
+    fn undo_empty_returns_false() {
+        let dir = TempDir::new().unwrap();
+        let mut history = History::new(dir.path().join("conversation.jsonl"));
+        assert!(!history.undo_last_exchange());
+    }
+
+    #[test]
+    fn undo_no_user_only_assistant_returns_false() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("conversation.jsonl");
+        let mut history = History::new(path);
+
+        history.record_assistant(Some("hi".into()), None, None, None);
+        assert!(!history.undo_last_exchange());
+        assert_eq!(history.messages().len(), 1);
+    }
+
+    #[test]
+    fn undo_persists_to_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("conversation.jsonl");
+        let mut history = History::new(path.clone());
+
+        history.push(ChatMessage::user("keep"));
+        history.record_assistant(Some("ok".into()), None, None, None);
+        history.push(ChatMessage::user("remove"));
+        history.record_assistant(Some("bye".into()), None, None, None);
+
+        assert!(history.undo_last_exchange());
+        drop(history);
+
+        let loaded = History::load(path).unwrap();
+        assert_eq!(loaded.messages().len(), 2);
+        assert_eq!(loaded.messages()[0].content.as_deref(), Some("keep"));
+        assert_eq!(loaded.messages()[1].content.as_deref(), Some("ok"));
+    }
+
+    #[test]
+    fn undo_sequential_multiple_times() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("conversation.jsonl");
+        let mut history = History::new(path);
+
+        history.push(ChatMessage::user("a"));
+        history.record_assistant(Some("1".into()), None, None, None);
+        history.push(ChatMessage::user("b"));
+        history.record_assistant(Some("2".into()), None, None, None);
+        history.push(ChatMessage::user("c"));
+        history.record_assistant(Some("3".into()), None, None, None);
+
+        assert!(history.undo_last_exchange());
+        assert_eq!(history.messages().len(), 4);
+        assert!(history.undo_last_exchange());
+        assert_eq!(history.messages().len(), 2);
+        assert!(history.undo_last_exchange());
+        assert_eq!(history.messages().len(), 0);
+        assert!(!history.undo_last_exchange());
     }
 }

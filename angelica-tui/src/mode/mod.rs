@@ -173,6 +173,13 @@ pub async fn execute_slash_command(state: &mut AppState, cmd: &str, tx: &mpsc::S
                 Some(s) => state.mode = crate::mode::AppMode::Settings(s),
                 None => state.add_chat(Role::System, "Failed to load config", None),
             },
+            "undo" | "u" => {
+                if state.is_streaming {
+                    state.add_chat(Role::System, "Cannot undo while streaming.", None);
+                } else {
+                    let _ = tx.send(UserAction::Undo).await;
+                }
+            }
             _ => {
                 state.add_chat(
                     Role::System,

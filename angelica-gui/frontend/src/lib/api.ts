@@ -73,6 +73,10 @@ export function quit(): Promise<void> {
   return invoke('quit');
 }
 
+export function undo(): Promise<void> {
+  return invoke('undo');
+}
+
 // Config operations go through the event bridge (agent ↔ frontend)
 // so they work identically with a local or remote agent.
 
@@ -130,6 +134,7 @@ export type AppEventMap = {
   'config-loaded': ConfigLoadedPayload;
   'config-saved': ConfigSavedPayload;
   'data-dir': DataDirPayload;
+  'undo-done': InitPayload;
 };
 
 export function onAppEvent<K extends keyof AppEventMap>(

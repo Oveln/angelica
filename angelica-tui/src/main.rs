@@ -39,9 +39,7 @@ fn init_logging(log_level: Option<&str>) {
         .with_line_number(false)
         .with_filter(env_filter);
 
-    tracing_subscriber::registry()
-        .with(file_layer)
-        .init();
+    tracing_subscriber::registry().with(file_layer).init();
 
     // Leak the guard so the non-blocking writer stays alive.
     std::mem::forget(_guard);

@@ -81,6 +81,11 @@ pub static BUILTIN_COMMANDS: &[SlashCommand] = &[
         aliases: &["set", "config"],
         description: "Open settings panel",
     },
+    SlashCommand {
+        name: "undo",
+        aliases: &["u"],
+        description: "Undo last message exchange",
+    },
 ];
 
 #[derive(Debug, Clone)]

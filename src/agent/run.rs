@@ -190,22 +190,21 @@ async fn run_loop(
                 match Config::parse_toml(&toml_str) {
                     Ok(_) => {
                         let path = config::config_path();
-                        let write_result = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-                            if let Some(parent) = path.parent() {
-                                let _ = std::fs::create_dir_all(parent);
-                            }
-                            let tmp = path.with_extension("toml.tmp");
-                            std::fs::write(&tmp, &toml_str)?;
-                            if let Err(e) = std::fs::rename(&tmp, &path) {
-                                let _ = std::fs::remove_file(&tmp);
-                                return Err(e);
-                            }
-                            Ok(())
-                        })
-                        .await
-                        .unwrap_or(Err(std::io::Error::other(
-                            "spawn_blocking failed",
-                        )));
+                        let write_result =
+                            tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+                                if let Some(parent) = path.parent() {
+                                    let _ = std::fs::create_dir_all(parent);
+                                }
+                                let tmp = path.with_extension("toml.tmp");
+                                std::fs::write(&tmp, &toml_str)?;
+                                if let Err(e) = std::fs::rename(&tmp, &path) {
+                                    let _ = std::fs::remove_file(&tmp);
+                                    return Err(e);
+                                }
+                                Ok(())
+                            })
+                            .await
+                            .unwrap_or(Err(std::io::Error::other("spawn_blocking failed")));
                         match write_result {
                             Ok(()) => {
                                 let _ = event_tx
@@ -240,6 +239,20 @@ async fn run_loop(
             UserAction::Quit => {
                 tracing::info!(action_count, "agent shutting down");
                 break;
+            }
+            UserAction::Undo => {
+                tracing::info!("undo requested");
+                if agent.history.undo_last_exchange() {
+                    agent.save_if_dirty().await;
+                    let entries = agent.history.to_display_entries();
+                    let _ = event_tx.send(AppEvent::UndoDone { entries }).await;
+                } else {
+                    let _ = event_tx
+                        .send(AppEvent::Error {
+                            message: "Nothing to undo.".to_string(),
+                        })
+                        .await;
+                }
             }
         }
     }

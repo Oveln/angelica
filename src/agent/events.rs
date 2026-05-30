@@ -78,6 +78,9 @@ pub enum AppEvent {
     WakingUp {
         dream: String,
     },
+    UndoDone {
+        entries: Vec<DisplayEntry>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -104,6 +107,7 @@ pub enum UserAction {
     UsageStats,
     RequestInit,
     Quit,
+    Undo,
 }
 
 // ── TS-exported payload types for the GUI event bridge ──

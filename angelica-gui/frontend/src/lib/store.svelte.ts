@@ -223,6 +223,11 @@ async function init() {
     addSystemMessage('祈芷醒来了，梦的余韵还留在心头。');
   });
 
+  await listenTo('undo-done', (p: InitEvent) => {
+    messages = convertEntries(p.entries);
+    addSystemMessage('已撤回。');
+  });
+
   try {
     await requestInit();
   } catch (e) {

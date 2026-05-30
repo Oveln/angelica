@@ -18,10 +18,7 @@ pub struct DebugState {
 
 // ── Server startup ────────────────────────────────────────────
 
-pub fn start_debug_server(
-    addr: std::net::SocketAddr,
-    snapshot_rx: watch::Receiver<DebugSnapshot>,
-) {
+pub fn start_debug_server(addr: std::net::SocketAddr, snapshot_rx: watch::Receiver<DebugSnapshot>) {
     let state = DebugState { snapshot_rx };
     let app = Router::new()
         .route("/", get(handler_index))

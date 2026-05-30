@@ -140,11 +140,129 @@ impl AppState {
                 self.cached_usage_sessions = Some(sessions.clone());
                 self.mode = AppMode::UsageStats;
             }
+            AppEvent::UndoDone { entries } => {
+                self.is_streaming = false;
+                self.mode = AppMode::Chat;
+                self.messages.clear();
+                self.rebuild_from_entries(entries);
+                self.add_chat(Role::System, "Undone.", None);
+            }
             AppEvent::ConfigLoaded { .. }
             | AppEvent::ConfigSaved { .. }
-            | AppEvent::DataDir { .. } => {
-                // Settings panel manages config via its own TUI module
-            }
+            | AppEvent::DataDir { .. } => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use angelica::agent::events::{DisplayEntry, DisplayRole};
+
+    fn entries_chat(count: usize) -> Vec<DisplayEntry> {
+        (0..count)
+            .map(|i| DisplayEntry::Chat {
+                role: if i % 2 == 0 {
+                    DisplayRole::User
+                } else {
+                    DisplayRole::Assistant
+                },
+                content: format!("msg {}", i),
+                thinking: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn undo_done_clears_and_rebuilds_messages() {
+        let mut state = AppState::new("test-model".into());
+        state.add_chat(Role::User, "old", None);
+        state.add_chat(Role::Assistant, "reply", None);
+        assert_eq!(state.messages.len(), 2);
+
+        let entries = entries_chat(4);
+        state.handle_event(&AppEvent::UndoDone { entries });
+
+        assert_eq!(state.messages.len(), 5);
+        match &state.messages[0] {
+            DisplayMessage::Chat { role, content, .. } => {
+                assert_eq!(*role, Role::User);
+                assert_eq!(content, "msg 0");
+            }
+            _ => panic!("expected chat message"),
+        }
+        match &state.messages[4] {
+            DisplayMessage::Chat { role, content, .. } => {
+                assert_eq!(*role, Role::System);
+                assert_eq!(content, "Undone.");
+            }
+            _ => panic!("expected system message"),
+        }
+    }
+
+    #[test]
+    fn undo_done_empty_entries_shows_only_system() {
+        let mut state = AppState::new("test-model".into());
+        state.add_chat(Role::User, "gone", None);
+
+        state.handle_event(&AppEvent::UndoDone { entries: vec![] });
+
+        assert_eq!(state.messages.len(), 1);
+        match &state.messages[0] {
+            DisplayMessage::Chat { role, content, .. } => {
+                assert_eq!(*role, Role::System);
+                assert_eq!(content, "Undone.");
+            }
+            _ => panic!("expected system message"),
+        }
+    }
+
+    #[test]
+    fn undo_done_with_tool_entries() {
+        let mut state = AppState::new("test-model".into());
+
+        let entries = vec![
+            DisplayEntry::Chat {
+                role: DisplayRole::User,
+                content: "read foo".into(),
+                thinking: None,
+            },
+            DisplayEntry::Tool {
+                call_id: "tc_1".into(),
+                name: "read_file".into(),
+                args_display: "read foo.rs".into(),
+                result: Some("contents".into()),
+                diff_preview: None,
+            },
+            DisplayEntry::Chat {
+                role: DisplayRole::Assistant,
+                content: "here it is".into(),
+                thinking: None,
+            },
+        ];
+
+        state.handle_event(&AppEvent::UndoDone { entries });
+
+        assert_eq!(state.messages.len(), 4);
+        match &state.messages[1] {
+            DisplayMessage::Tool { name, result, .. } => {
+                assert_eq!(name, "read_file");
+                assert_eq!(result.as_deref(), Some("contents"));
+            }
+            _ => panic!("expected tool message"),
+        }
+    }
+
+    #[test]
+    fn undo_done_resets_mode_to_chat() {
+        let mut state = AppState::new("test-model".into());
+        state.mode = AppMode::Streaming;
+        state.is_streaming = true;
+
+        state.handle_event(&AppEvent::UndoDone {
+            entries: entries_chat(2),
+        });
+
+        assert!(!state.is_streaming);
     }
 }

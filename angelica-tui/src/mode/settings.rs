@@ -214,9 +214,7 @@ impl SettingsState {
             Ok(())
         })
         .await
-        .unwrap_or(Err(std::io::Error::other(
-            "spawn_blocking failed",
-        )));
+        .unwrap_or(Err(std::io::Error::other("spawn_blocking failed")));
 
         match write_result {
             Ok(()) => {}

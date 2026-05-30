@@ -302,7 +302,43 @@ dispatch() → PermissionAction::Ask → AppEvent::ApprovalPending
 
 ---
 
-## 9 工作流程
+## 9 测试规范
+
+以事件桥为切面，分三层独立测试：
+
+### 9.1 Core 层（单元测试）
+
+直接测试 core 内部逻辑，不需要前端或 LLM：
+
+- `History` 操作、`Tool` 执行、`PermissionEvaluator`、`FatigueModel` 等纯逻辑
+- `#[cfg(test)]` 内联模块，`tempfile::TempDir` 管理临时文件
+- 测试文件 I/O 持久化：操作后 drop → 重新 load → 断言
+
+### 9.2 TUI 层（事件 → 状态测试）
+
+`AppState::handle_event(&AppEvent)` 是纯状态变换，不依赖终端：
+
+- 构造 `AppEvent` 变体（如 `UndoDone { entries }`），喂入 `handle_event`
+- 断言 `state.messages`、`state.mode`、`state.is_streaming` 等字段
+- 测试文件：各模块 `#[cfg(test)]` 内联（如 `event.rs`、`state.rs`）
+
+### 9.3 GUI 层
+
+- Rust 侧 `serialize_event` 是纯函数，可加 `#[test]` 断言序列化结构
+- 前端 store 暂无测试基础设施，待补充
+
+### 9.4 要求
+
+**每新增或修改功能，必须补充对应测试用例**：
+
+1. Core 新增方法 → 对应 `#[test]`（覆盖正常路径 + 边界情况 + 文件持久化）
+2. 新增 `AppEvent` 变体 → TUI `handle_event` 测试 + `serialize_event` 测试
+3. 新增 `UserAction` → Core `run_loop` 分支测试（如可行）
+4. 修改已有逻辑 → 确保原有测试仍然通过，补充回归测试
+
+---
+
+## 10 工作流程
 
 1. 修改代码
 2. `cargo test && cargo clippy`

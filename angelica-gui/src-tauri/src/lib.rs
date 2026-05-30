@@ -112,6 +112,12 @@ async fn save_config(state: tauri::State<'_, AppState>, toml_str: String) -> Res
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn undo(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let tx = state.user_tx.lock().map_err(|e| e.to_string())?.clone();
+    tx.send(UserAction::Undo).await.map_err(|e| e.to_string())
+}
+
 pub struct AppState {
     pub user_tx: Mutex<mpsc::Sender<UserAction>>,
 }
@@ -206,6 +212,7 @@ pub fn run(debug: bool, log_level: Option<&str>, config_path: Option<std::path::
             load_config,
             get_data_dir,
             save_config,
+            undo,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -429,6 +436,15 @@ fn serialize_event(event: &AppEvent) -> (&'static str, serde_json::Value) {
             })
             .expect("serialize waking-up payload");
             ("waking-up", payload)
+        }
+        AppEvent::UndoDone { entries } => {
+            let payload = serde_json::to_value(InitPayload {
+                entries: entries.clone(),
+                current_usage: None,
+                model_name: String::new(),
+            })
+            .expect("serialize undo-done payload");
+            ("undo-done", payload)
         }
     }
 }

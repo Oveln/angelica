@@ -66,12 +66,9 @@ impl<S: RunMode> Agent<S> {
                 usage,
             } = llm_result;
 
-            // Update fatigue from current context size on every LLM response.
             if let Some(ref metrics) = usage {
                 self.run_state.on_context_update(metrics.total_tokens);
             }
-
-            self.emit_debug_snapshot();
 
             if self.run_state.accumulate_history() {
                 self.history.record_assistant(
@@ -82,6 +79,8 @@ impl<S: RunMode> Agent<S> {
                 );
                 self.dirty = true;
             }
+
+            self.emit_debug_snapshot();
 
             let Some(tcs) = tool_calls else {
                 self.run_state.on_turn_complete(content.as_deref());

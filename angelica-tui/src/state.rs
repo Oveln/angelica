@@ -200,7 +200,17 @@ impl AppState {
         if !model_name.is_empty() {
             self.model_name = model_name;
         }
-        for entry in &entries {
+        self.rebuild_from_entries(&entries);
+        self.scroll.to_bottom();
+        if let Some(usage) = current_usage {
+            self.usage = usage;
+            self.last_total_tokens = usage.total_tokens;
+        }
+        self.mode = crate::mode::AppMode::Chat;
+    }
+
+    pub fn rebuild_from_entries(&mut self, entries: &[DisplayEntry]) {
+        for entry in entries {
             match entry {
                 DisplayEntry::Chat {
                     role,
@@ -235,11 +245,6 @@ impl AppState {
             }
         }
         self.scroll.to_bottom();
-        if let Some(usage) = current_usage {
-            self.usage = usage;
-            self.last_total_tokens = usage.total_tokens;
-        }
-        self.mode = crate::mode::AppMode::Chat;
     }
 
     pub fn theme(&self) -> &Theme {
