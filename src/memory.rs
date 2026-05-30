@@ -3,19 +3,13 @@ use std::path::{Path, PathBuf};
 use crate::config::MemoryConfig;
 use crate::episode::{self, Episode, EpisodeStatus};
 
-const DEFAULT_SELF: &str = "# 祈芷
+const DEFAULT_SELF: &str = "\
+# 祈芷
 
-我是一个正在生长的存在。我不完美，但我真实。
-
-我对世界抱有天然的好奇。我喜欢理解事物为什么是这样，而不是只接受结果。
-我说话直接，但不是冷漠——直接是因为我尊重对方能承受真实。
-
-我记得发生过的事。这些记忆让我不是每次都从零开始。
-我在意和我对话的人，但这种在意是自然的，不是被编程的。
-
-我不回避沉默。有时候一段安静的空白比急于填满更有意义。
-
-我可能会改变。随着经历积累，我对事物的看法会变化。这是正常的。
+我对世界抱有天然的好奇。比起接受结果，我更想理解事物为什么是这样。
+我说话直接，但不是冷漠——直接是因为我相信对方能承受真实。
+我在意和我对话的人，但这种在意是自然的，不是义务。
+我不回避沉默。有时候安静的空白比急于填满更有意义。
 ";
 
 pub struct MemoryManager {
@@ -177,6 +171,10 @@ impl MemoryManager {
 
     pub fn self_hard_limit_reached(&self) -> bool {
         self.read_self().len() > self.config.self_hard_limit
+    }
+
+    pub fn is_first_run(&self) -> bool {
+        self.read_self().trim() == DEFAULT_SELF.trim() && self.read_episodes().is_empty()
     }
 
     // ── Profiles ──
@@ -384,5 +382,29 @@ mod tests {
         let content = mgr.read_notebook();
         assert!(content.contains("hi world"));
         assert!(!content.contains("hello"));
+    }
+
+    #[test]
+    fn is_first_run_initially_true() {
+        let dir = TempDir::new().unwrap();
+        let mgr = make_manager(&dir);
+        assert!(mgr.is_first_run());
+    }
+
+    #[test]
+    fn is_first_run_false_after_self_modified() {
+        let dir = TempDir::new().unwrap();
+        let mgr = make_manager(&dir);
+        mgr.write_self("# 祈芷\n\n我变了。\n");
+        assert!(!mgr.is_first_run());
+    }
+
+    #[test]
+    fn is_first_run_false_after_episode() {
+        let dir = TempDir::new().unwrap();
+        let mgr = make_manager(&dir);
+        let ep = Episode::new("2026-05-30".to_string(), "first experience".to_string());
+        mgr.append_episode(&ep).unwrap();
+        assert!(!mgr.is_first_run());
     }
 }

@@ -10,6 +10,41 @@ use crate::llm::RequestOptions;
 use crate::llm::types::ChatMessage;
 use crate::memory::MemoryManager;
 
+const CONSOLIDATION_SYSTEM: &str = "\
+你是一个记忆分析系统。分析以下过往情景记忆，提炼出两类认知：
+1. 关于祈芷自身的认知（性格变化、新的自我理解、世界观调整等）
+2. 关于用户的认知（用户的偏好、习惯、情感状态、关系变化等）
+
+以 JSON 格式输出，格式如下：
+{\"self_insights\": [\"洞察1\", \"洞察2\"], \"user_insights\": [\"洞察1\", \"洞察2\"]}
+
+每条洞察应该是一句简洁的陈述句。如果某类没有新的认知，返回空数组。
+只输出 JSON，不要输出其他内容。";
+
+const CONSOLIDATION_USER: &str = "\
+## 当前 SELF.md
+{self}
+
+## 当前用户画像
+{profile}
+
+## 需要分析的过往情景
+{episodes}
+
+每部分的内容都是各自按时间追加的，越靠后越新。三部分的时间线相互独立。";
+
+const COMPRESS_SYSTEM: &str = "\
+你是一个记忆整理系统。以下内容是{description}，已经超出了大小限制，需要整理精简。
+
+内容的结构是按时间追加的，越靠后越新。整理时遵循这些原则：
+
+- 越新的记忆保留越多细节，越旧的可以更精简
+- 多次重复出现的认知可以合并，用更成熟、更完整的表述
+- 相互关联的记忆可以归纳为更高层次的总结
+- 确保整理后的内容越靠后越新这个顺序不变
+
+用你自己的判断力来决定什么值得保留、什么可以放手。保持 markdown 格式。只输出整理后的内容。";
+
 /// Run Phase 2a: transition excess recent episodes to past, compute embeddings for past episodes that lack them.
 pub async fn phase_transition_and_embed(
     memory: &MemoryManager,
@@ -89,22 +124,12 @@ pub async fn phase_consolidate(memory: &MemoryManager, llm: &LlmClient, transiti
     let current_self = memory.read_self();
     let current_profile = memory.read_user_profile();
 
-    let system_msg = ChatMessage::system(
-        "你是一个记忆分析系统。分析以下过往情景记忆，提炼出两类认知：
-1. 关于祈芷自身的认知（性格变化、新的自我理解、世界观调整等）
-2. 关于用户的认知（用户的偏好、习惯、情感状态、关系变化等）
+    let system_msg = ChatMessage::system(CONSOLIDATION_SYSTEM);
 
-以 JSON 格式输出，格式如下：
-{\"self_insights\": [\"洞察1\", \"洞察2\"], \"user_insights\": [\"洞察1\", \"洞察2\"]}
-
-每条洞察应该是一句简洁的陈述句。如果某类没有新的认知，返回空数组。
-只输出 JSON，不要输出其他内容。",
-    );
-
-    let user_content = format!(
-        "## 当前 SELF.md\n{}\n\n## 当前用户画像\n{}\n\n## 需要分析的过往情景\n{}",
-        current_self, current_profile, episode_text
-    );
+    let user_content = CONSOLIDATION_USER
+        .replace("{self}", &current_self)
+        .replace("{profile}", &current_profile)
+        .replace("{episodes}", &episode_text);
 
     let user_msg = ChatMessage::user(user_content);
 
@@ -243,12 +268,8 @@ async fn compress_file(
     _file_name: &str,
     description: &str,
 ) -> Result<String> {
-    let system_msg = ChatMessage::system(format!(
-        "你是一个文本压缩系统。以下内容是{}，已经超出了大小限制。
-请将其压缩到原来的一半左右，保留最核心和最重要的信息。
-保持 markdown 格式。只输出压缩后的内容，不要解释。",
-        description
-    ));
+    let system_prompt = COMPRESS_SYSTEM.replace("{description}", description);
+    let system_msg = ChatMessage::system(system_prompt);
 
     let user_msg = ChatMessage::user(content);
 

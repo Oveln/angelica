@@ -26,6 +26,10 @@ impl std::fmt::Display for Role {
     }
 }
 
+const CTX_TIME_PREFIX: &str = "当前时间：";
+const CTX_FATIGUE_PREFIX: &str = "\n你的状态：";
+const CTX_DREAM_RESIDUE: &str = "\n你刚从梦中醒来，梦中的感受还隐约残留。";
+
 /// Per-turn runtime context injected into user messages.
 /// Stored as structured data; rendered to text only when building
 /// the prompt for the LLM.
@@ -43,19 +47,12 @@ pub struct Context {
 
 impl std::fmt::Display for Context {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "当前时间：{}", self.time)?;
+        write!(f, "{}{}", CTX_TIME_PREFIX, self.time)?;
         if let Some(ref fatigue) = self.fatigue {
-            write!(f, "\n你的状态：{}", fatigue)?;
-        }
-        if self.turns > 0 {
-            write!(
-                f,
-                "\n本轮对话 {} 轮，使用 {} 次工具",
-                self.turns, self.tool_calls
-            )?;
+            write!(f, "{}{}", CTX_FATIGUE_PREFIX, fatigue)?;
         }
         if self.has_dream {
-            write!(f, "\n你刚从梦中醒来，梦中的感受还隐约残留。")?;
+            write!(f, "{}", CTX_DREAM_RESIDUE)?;
         }
         if let Some(ref recall) = self.recall {
             write!(f, "\n唤起的记忆：\n{}", recall)?;
