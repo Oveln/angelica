@@ -21,12 +21,16 @@ impl AppState {
             }
             AppEvent::ThinkingDelta { delta } => {
                 self.thinking_buffer.push_str(delta);
-                self.mode = AppMode::Streaming;
+                if matches!(self.mode, AppMode::Chat | AppMode::Streaming) {
+                    self.mode = AppMode::Streaming;
+                }
                 self.is_streaming = true;
             }
             AppEvent::TextDelta { delta } => {
                 self.text_buffer.push_str(delta);
-                self.mode = AppMode::Streaming;
+                if matches!(self.mode, AppMode::Chat | AppMode::Streaming) {
+                    self.mode = AppMode::Streaming;
+                }
                 self.is_streaming = true;
             }
             AppEvent::TextDone { full_text } => {

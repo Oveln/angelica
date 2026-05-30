@@ -29,6 +29,7 @@ let thinkingVisible = $state(true);
 let showUsageStats = $state(false);
 let usageSessions = $state<SessionUsage[]>([]);
 let usage = $state<UsageMetrics | null>(null);
+let connectionLost = $state(false);
 
 const unsubs: (() => void)[] = [];
 
@@ -89,7 +90,7 @@ function convertEntries(entries: DisplayEntry[]): Message[] {
         display: entry.args_display,
         result: entry.result ?? undefined,
         diffPreview: entry.diff_preview,
-        pending: !entry.result,
+        pending: entry.result === null,
         timestamp: Date.now(),
       });
     }
@@ -232,6 +233,7 @@ async function init() {
     await requestInit();
   } catch (e) {
     console.error('Failed to request init:', e);
+    connectionLost = true;
   }
 }
 
@@ -260,6 +262,7 @@ export function getStore() {
     get showUsageStats() { return showUsageStats; },
     get usageSessions() { return usageSessions; },
     get usage() { return usage; },
+    get connectionLost() { return connectionLost; },
     get inputDisabled() { return isStreaming || approval !== null; },
     set thinkingVisible(v: boolean) { thinkingVisible = v; },
     set showUsageStats(v: boolean) { showUsageStats = v; },

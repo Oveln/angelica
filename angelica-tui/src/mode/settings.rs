@@ -83,7 +83,7 @@ impl SettingsState {
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
             KeyCode::PageUp => self.move_selection(-10),
-            KeyCode::PageDown => self.move_selection(1), // will be clamped
+            KeyCode::PageDown => self.move_selection(10),
             KeyCode::Enter => self.start_edit(),
             // 's' (save) handled in app.rs via save()
             KeyCode::Char('r') => self.reset_entry(),
@@ -115,7 +115,7 @@ impl SettingsState {
         match key.code {
             KeyCode::Enter => self.confirm_edit(),
             KeyCode::Esc => self.cancel_edit(),
-            KeyCode::Char(c) => self.edit_buffer.insert(c),
+            KeyCode::Char(c) if !key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) => self.edit_buffer.insert(c),
             KeyCode::Backspace => self.edit_buffer.backspace(),
             KeyCode::Delete => self.edit_buffer.delete(),
             KeyCode::Left => self.edit_buffer.move_left(),

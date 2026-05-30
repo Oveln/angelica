@@ -25,6 +25,8 @@
   let inputText = $state('');
   let showSlashMenu = $state(false);
   let listEl: HTMLDivElement | undefined = $state();
+  let autoScroll = $state(true);
+  let scrollPending = false;
 
   onMount(() => {
     s.init();
@@ -104,22 +106,37 @@
     }
   }
 
+  function handleListScroll() {
+    if (!listEl) return;
+    const threshold = 150;
+    const distanceFromBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight;
+    autoScroll = distanceFromBottom <= threshold;
+  }
+
   $effect(() => {
     s.messages;
     s.textBuffer;
     s.thinkingBuffer;
-    scrollToBottom();
+    if (autoScroll) scrollToBottom();
   });
 
   function scrollToBottom() {
     if (!listEl) return;
+    if (scrollPending) return;
+    scrollPending = true;
     requestAnimationFrame(() => {
       if (listEl) listEl.scrollTop = listEl.scrollHeight;
+      scrollPending = false;
     });
   }
 </script>
 
 <div class="flex flex-col h-screen app-bg">
+  {#if s.connectionLost}
+    <div class="connection-lost-banner">
+      Connection to agent lost. Please restart the application.
+    </div>
+  {/if}
   <header class="px-6 pt-6 pb-3">
     <div class="max-w-2xl mx-auto">
       <div class="flex items-center justify-between">
@@ -140,7 +157,7 @@
     </div>
   </header>
 
-  <div class="flex-1 overflow-y-auto" bind:this={listEl}>
+  <div class="flex-1 overflow-y-auto" bind:this={listEl} onscroll={handleListScroll}>
     <MessageList
       messages={s.messages}
       thinkingVisible={s.thinkingVisible}
@@ -149,6 +166,16 @@
       isStreaming={s.isStreaming}
     />
   </div>
+
+  {#if !autoScroll}
+    <button
+      class="scroll-to-bottom-btn"
+      onclick={() => { autoScroll = true; scrollToBottom(); }}
+      title="Scroll to bottom"
+    >
+      ↓
+    </button>
+  {/if}
 
   {#if s.approval}
     <ApprovalPanel
@@ -173,6 +200,8 @@
     <InputBar
       bind:text={inputText}
       disabled={s.inputDisabled}
+      isStreaming={s.isStreaming}
+      approvalPending={s.approval !== null}
       onSend={handleSend}
       onKeydown={handleInputKeydown}
       onInputChange={handleInputChange}
@@ -214,5 +243,36 @@
     margin: 0 auto;
     padding: 0 24px;
     position: relative;
+  }
+  .scroll-to-bottom-btn {
+    position: fixed;
+    bottom: 5.5rem;
+    right: 2rem;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 50%;
+    border: 1px solid rgba(200, 168, 130, 0.25);
+    background: rgba(8, 8, 8, 0.85);
+    color: var(--color-amber);
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.2s, border-color 0.2s;
+    z-index: 10;
+    animation: fade-in-simple 0.2s ease-out;
+  }
+  .scroll-to-bottom-btn:hover {
+    border-color: var(--color-amber);
+    opacity: 0.9;
+  }
+  .connection-lost-banner {
+    background: #b91c1c;
+    color: #fff;
+    text-align: center;
+    padding: 0.6em 1em;
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
   }
 </style>

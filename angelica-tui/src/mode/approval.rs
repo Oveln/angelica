@@ -145,7 +145,7 @@ pub async fn handle_key(
                 }
             }
             KeyCode::Char('n') if !editing => action = ApprovalAction::Reject(None),
-            KeyCode::Char(c) if editing => {
+            KeyCode::Char(c) if editing && !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
                 a.feedback.insert(c);
             }
             KeyCode::Backspace if editing => {

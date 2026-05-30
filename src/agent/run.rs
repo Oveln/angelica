@@ -118,6 +118,7 @@ async fn run_loop(
                             .await;
                     }
                 }
+                let _ = event_tx.send(AppEvent::TurnComplete).await;
             }
             UserAction::ApprovePending => {
                 let _ = agent.approve_and_step(event_tx).await;

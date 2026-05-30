@@ -2,18 +2,32 @@
   let {
     text = $bindable(''),
     disabled = false,
+    isStreaming = false,
+    approvalPending = false,
     onSend,
     onKeydown,
     onInputChange,
   }: {
     text: string;
     disabled: boolean;
+    isStreaming: boolean;
+    approvalPending: boolean;
     onSend: () => void;
     onKeydown: (e: KeyboardEvent) => void;
     onInputChange: () => void;
   } = $props();
 
   let textareaEl: HTMLTextAreaElement | undefined = $state();
+
+  let placeholder = $derived(
+    disabled
+      ? isStreaming
+        ? '等待回复...'
+        : approvalPending
+          ? '需要审批...'
+          : ''
+      : '说些什么...  / 查看命令',
+  );
 
   function handleInput() {
     if (!textareaEl) return;
@@ -29,7 +43,7 @@
       bind:this={textareaEl}
       class="input-field"
       rows="1"
-      placeholder={disabled ? '' : '说些什么...  / 查看命令'}
+      {placeholder}
       bind:value={text}
       onkeydown={onKeydown}
       oninput={handleInput}

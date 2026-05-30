@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ChatMessage } from '$lib/types';
+  import { renderMarkdown } from '$lib/markdown';
 
   let {
     msg,
@@ -10,6 +11,22 @@
   } = $props();
 
   let thinkingOpen = $state(thinkingVisible);
+
+  // Debounced markdown rendering — avoid calling marked.parse() on every
+  // streaming delta which can cause jank on long responses.
+  let rendered = $state('');
+  let renderTimer: ReturnType<typeof setTimeout> | undefined;
+
+  $effect(() => {
+    const content = msg.content;
+    if (!content) { rendered = ''; return; }
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(() => { rendered = renderMarkdown(content); }, 150);
+    // Immediate render for short or initial content to avoid perceived lag
+    if (content.length < 200 || !rendered) {
+      rendered = renderMarkdown(content);
+    }
+  });
 </script>
 
 <div class="streaming-bubble">
@@ -33,10 +50,10 @@
       </div>
     {/if}
 
-    {#if msg.content}
-      <p class="text-[1rem] leading-relaxed whitespace-pre-wrap" style="color: var(--color-ink);">
-        {msg.content}
-      </p>
+    {#if rendered}
+      <div class="prose-ink max-w-none">
+        {@html rendered}
+      </div>
     {/if}
 
     <span class="stream-cursor"></span>

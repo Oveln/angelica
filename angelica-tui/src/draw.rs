@@ -372,8 +372,8 @@ fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
         ),
     ];
 
-    let left_width: usize = left_parts.iter().map(|s| s.content.len()).sum();
-    let right_width: usize = right_parts.iter().map(|s| s.content.len()).sum();
+    let left_width: usize = left_parts.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum();
+    let right_width: usize = right_parts.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum();
     let gap = area.width as usize;
     let fill = gap.saturating_sub(left_width + right_width);
 

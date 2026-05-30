@@ -126,7 +126,7 @@ pub async fn handle_key(
                 };
             }
         }
-        KeyCode::Char(c) => {
+        KeyCode::Char(c) if !key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) => {
             state.input.insert(c);
             if let AppMode::SlashMenu(ref mut sm) = state.mode {
                 sm.update_matches(state.input.as_str());
@@ -142,12 +142,12 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
         AppMode::SlashMenu(sm) => sm,
         _ => return,
     };
-    if sm.matched.is_empty() {
-        return;
-    }
-
     let menu_width: u16 = 48;
-    let menu_height = (sm.matched.len().min(8) as u16) + 2;
+    let menu_height = if sm.matched.is_empty() {
+        3 // border + message + border
+    } else {
+        (sm.matched.len().min(8) as u16) + 2
+    };
     let menu_area = Rect {
         x: area.x + 2,
         y: area.bottom().saturating_sub(3 + menu_height),
@@ -167,6 +167,15 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, theme: &Theme) {
         width: menu_area.width.saturating_sub(2),
         height: menu_area.height.saturating_sub(2),
     };
+
+    if sm.matched.is_empty() {
+        let msg = Line::from(Span::styled(
+            " No matching commands",
+            Style::default().fg(theme.muted),
+        ));
+        f.render_widget(Paragraph::new(msg), inner);
+        return;
+    }
 
     let name_col_width = 20usize;
     let inner_w = inner.width as usize;

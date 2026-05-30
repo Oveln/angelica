@@ -1,5 +1,6 @@
 <script lang="ts">
   import { loadConfig, saveConfig, getDataDir } from '$lib/api';
+  import smolToml from 'smol-toml';
 
   // ── Types ──
 
@@ -176,129 +177,78 @@
   }
 
   function formToToml(): string {
-    const lines: string[] = [];
+    const data: Record<string, any> = {};
 
     // LLM
-    lines.push('[llm]');
-    lines.push(`max_iterations = ${form.max_iterations}`);
-    if (form.role_immersion !== '') lines.push(`role_immersion = ${form.role_immersion}`);
-    if (form.default_provider) lines.push(`default_provider = "${form.default_provider}"`);
-    lines.push('');
-    for (const prov of form.providers) {
-      lines.push('[[llm.providers]]');
-      lines.push(`name = "${prov.name}"`);
-      lines.push(`adapter = "${prov.adapter}"`);
-      if (prov.model) lines.push(`model = "${prov.model}"`);
-      if (prov.base_url) lines.push(`base_url = "${prov.base_url}"`);
-      if (prov.api_key) lines.push(`api_key = "${prov.api_key}"`);
-      if (prov.max_tokens) lines.push(`max_tokens = ${prov.max_tokens}`);
-      if (prov.temperature) lines.push(`temperature = ${prov.temperature}`);
-      if (prov.thinking !== '') lines.push(`thinking = ${prov.thinking}`);
-      if (prov.reasoning_effort) lines.push(`reasoning_effort = "${prov.reasoning_effort}"`);
-      lines.push('');
-    }
+    data.llm = {
+      max_iterations: Number(form.max_iterations) || 10,
+    };
+    if (form.role_immersion !== '') data.llm.role_immersion = !!form.role_immersion;
+    if (form.default_provider) data.llm.default_provider = form.default_provider;
+    data.llm.providers = form.providers.map((prov) => {
+      const obj: Record<string, any> = {
+        name: prov.name,
+        adapter: prov.adapter,
+      };
+      if (prov.model) obj.model = prov.model;
+      if (prov.base_url) obj.base_url = prov.base_url;
+      if (prov.api_key) obj.api_key = prov.api_key;
+      if (prov.max_tokens) obj.max_tokens = Number(prov.max_tokens);
+      if (prov.temperature) obj.temperature = Number(prov.temperature);
+      if (prov.thinking !== '') obj.thinking = !!prov.thinking;
+      if (prov.reasoning_effort) obj.reasoning_effort = prov.reasoning_effort;
+      return obj;
+    });
 
     // Memory
-    lines.push('[memory]');
-    lines.push(`episodes_path = "${form.episodes_path}"`);
-    lines.push(`self_path = "${form.self_path}"`);
-    lines.push(`profiles_dir = "${form.profiles_dir}"`);
-    lines.push(`notebook_path = "${form.notebook_path}"`);
-    lines.push(`max_file_size_kb = ${form.max_file_size_kb}`);
-    lines.push(`recent_threshold = ${form.recent_threshold}`);
-    lines.push(`episode_inject_budget = ${form.episode_inject_budget}`);
-    lines.push(`recall_similarity_threshold = ${form.recall_similarity_threshold}`);
-    lines.push(`recall_inject_threshold = ${form.recall_inject_threshold}`);
-    lines.push(`recall_inject_probability = ${form.recall_inject_probability}`);
-    lines.push(`self_hard_limit = ${form.self_hard_limit}`);
-    lines.push(`profile_hard_limit = ${form.profile_hard_limit}`);
-    lines.push('');
+    data.memory = {
+      episodes_path: form.episodes_path,
+      self_path: form.self_path,
+      profiles_dir: form.profiles_dir,
+      notebook_path: form.notebook_path,
+      max_file_size_kb: Number(form.max_file_size_kb) || 32,
+      recent_threshold: Number(form.recent_threshold) || 5,
+      episode_inject_budget: Number(form.episode_inject_budget) || 2,
+      recall_similarity_threshold: Number(form.recall_similarity_threshold) || 0.6,
+      recall_inject_threshold: Number(form.recall_inject_threshold) || 0.7,
+      recall_inject_probability: Number(form.recall_inject_probability) || 0.6,
+      self_hard_limit: Number(form.self_hard_limit) || 8192,
+      profile_hard_limit: Number(form.profile_hard_limit) || 8192,
+    };
 
     // Embedding
-    lines.push('[embedding]');
-    lines.push(`enabled = ${form.embed_enabled}`);
-    lines.push(`model = "${form.embed_model}"`);
-    lines.push(`base_url = "${form.embed_base_url}"`);
-    if (form.embed_api_key_env) lines.push(`api_key_env = "${form.embed_api_key_env}"`);
-    lines.push('');
+    data.embedding = {
+      enabled: form.embed_enabled,
+      model: form.embed_model,
+      base_url: form.embed_base_url,
+    };
+    if (form.embed_api_key_env) data.embedding.api_key_env = form.embed_api_key_env;
 
     // Fatigue
-    lines.push('[fatigue]');
-    lines.push(`max_context_tokens = ${form.max_context_tokens}`);
-    lines.push(`curve_exponent = ${form.curve_exponent}`);
-    lines.push(`sleep_threshold = ${form.sleep_threshold}`);
-    lines.push(`can_sleep_threshold = ${form.can_sleep_threshold}`);
-    lines.push(`groggy_turns = ${form.groggy_turns}`);
-    lines.push('');
+    data.fatigue = {
+      max_context_tokens: Number(form.max_context_tokens) || 120000,
+      curve_exponent: Number(form.curve_exponent) || 1.0,
+      sleep_threshold: Number(form.sleep_threshold) || 0.85,
+      can_sleep_threshold: Number(form.can_sleep_threshold) || 0.6,
+      groggy_turns: Number(form.groggy_turns) || 3,
+    };
 
     // State
-    lines.push('[state]');
-    lines.push(`path = "${form.state_path}"`);
-    lines.push(`conversation_path = "${form.conversation_path}"`);
-    lines.push('');
+    data.state = {
+      path: form.state_path,
+      conversation_path: form.conversation_path,
+    };
 
     // Skills
-    lines.push('[skills]');
-    lines.push(`directory = "${form.skills_dir}"`);
-    lines.push('');
+    data.skills = {
+      directory: form.skills_dir,
+    };
 
-    return lines.join('\n');
+    return smolToml.stringify(data);
   }
 
-  // Minimal TOML parser
   function parseTomlLoose(raw: string): Record<string, any> {
-    const result: Record<string, any> = {};
-    let currentObj: any = result;
-
-    for (const line of raw.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-
-      const arrayHeaderMatch = trimmed.match(/^\[\[(.+)\]\]$/);
-      if (arrayHeaderMatch) {
-        const path = arrayHeaderMatch[1];
-        const parts = path.split('.');
-        let parent: any = result;
-        for (let i = 0; i < parts.length - 1; i++) {
-          if (!parent[parts[i]]) parent[parts[i]] = {};
-          parent = parent[parts[i]];
-        }
-        const lastKey = parts[parts.length - 1];
-        if (!parent[lastKey]) parent[lastKey] = [];
-        const newObj: Record<string, any> = {};
-        parent[lastKey].push(newObj);
-        currentObj = newObj;
-        continue;
-      }
-
-      const headerMatch = trimmed.match(/^\[(.+)\]$/);
-      if (headerMatch) {
-        const section = headerMatch[1];
-        const parts = section.split('.');
-        let parent: any = result;
-        for (const p of parts) {
-          if (!parent[p]) parent[p] = {};
-          parent = parent[p];
-        }
-        currentObj = parent;
-        continue;
-      }
-
-      const kvMatch = trimmed.match(/^([\w.-]+)\s*=\s*(.+)$/);
-      if (kvMatch) {
-        currentObj[kvMatch[1]] = parseValue(kvMatch[2].trim());
-      }
-    }
-    return result;
-  }
-
-  function parseValue(v: string): any {
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) return v.slice(1, -1);
-    if (v === 'true') return true;
-    if (v === 'false') return false;
-    const n = Number(v);
-    if (!isNaN(n) && v !== '') return n;
-    return v;
+    return smolToml.parse(raw) as Record<string, any>;
   }
 
   function markDirty() { dirty = true; }

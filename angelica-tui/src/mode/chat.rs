@@ -65,7 +65,7 @@ pub async fn handle_key(state: &mut AppState, key: KeyEvent, tx: &mpsc::Sender<U
                 state.scroll.up(3);
             }
         }
-        KeyCode::Char(c) => {
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
             state.input.insert(c);
             if state.input.starts_with('/') && state.input.chars().count() <= 15 {
                 if !matches!(state.mode, AppMode::SlashMenu(_)) {
